@@ -12,8 +12,9 @@ const DEMO_THREADS = [
   },
 ];
 
-export default appInstances.onAppInstanceInstalled(async (event) => {
+export default appInstances.onAppInstanceInstalled((event) => {
   const instanceId = event.metadata.instanceId;
+  void (async () => {
 
   const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL as string | undefined;
   const supabaseKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY as string | undefined;
@@ -100,4 +101,5 @@ export default appInstances.onAppInstanceInstalled(async (event) => {
   } catch (err) {
     console.error('[ForumFlow] app-installed: email exception', err);
   }
+  })();
 });

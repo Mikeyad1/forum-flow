@@ -16,6 +16,7 @@ type CreateThreadBody = {
 
 export async function POST({ request }: { request: Request }) {
   try {
+    const body = (await request.json()) as CreateThreadBody;
     let userId: string | undefined;
     let subjectType: string | undefined;
     try {
@@ -49,8 +50,6 @@ export async function POST({ request }: { request: Request }) {
         // keep default
       }
     }
-
-    const body = (await request.json()) as CreateThreadBody;
 
     if (subjectType === "VISITOR") {
       const visitorName = body.visitor_name;
