@@ -1,4 +1,5 @@
 import { auth } from "@wix/essentials";
+import { appInstances } from "@wix/app-management";
 import { members } from "@wix/members";
 
 type CreateThreadBody = {
@@ -15,34 +16,18 @@ type CreateThreadBody = {
 
 export async function POST({ request }: { request: Request }) {
   try {
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader) {
+    let userId: string | undefined;
+    let subjectType: string | undefined;
+    try {
+      const tokenInfo = await auth.getTokenInfo();
+      userId = tokenInfo.subjectId;
+      subjectType = tokenInfo.subjectType;
+    } catch {
       return new Response(JSON.stringify({ error: "You must be logged in to post." }), {
         status: 401,
         headers: { "Content-Type": "application/json" },
       });
     }
-
-    const tokenInfoResponse = await fetch("https://www.wixapis.com/oauth2/token-info", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: authHeader }),
-    });
-
-    if (!tokenInfoResponse.ok) {
-      return new Response(JSON.stringify({ error: "You must be logged in to post." }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const tokenInfo = (await tokenInfoResponse.json()) as {
-      subjectId?: string;
-      subjectType?: string;
-    };
-    const userId = tokenInfo.subjectId;
-    const subjectType = tokenInfo.subjectType;
-
     if (!userId || !subjectType) {
       return new Response(JSON.stringify({ error: "You must be logged in to post." }), {
         status: 401,
@@ -119,6 +104,33 @@ export async function POST({ request }: { request: Request }) {
         });
       }
 
+      // Plan limit check
+      try {
+        const elevatedGetAppInstance = auth.elevate(appInstances.getAppInstance);
+        const instanceResponse = await elevatedGetAppInstance();
+        const isFree = instanceResponse.instance?.isFree ?? true;
+        if (isFree) {
+          const countRes = await fetch(
+            `${supabaseUrl}/rest/v1/threads?site_id=eq.${encodeURIComponent(instanceId)}&select=id`,
+            {
+              headers: {
+                apikey: supabaseServiceRoleKey,
+                Authorization: `Bearer ${supabaseServiceRoleKey}`,
+              },
+            }
+          );
+          const rows = (await countRes.json()) as { id: string }[];
+          if (Array.isArray(rows) && rows.length >= 25) {
+            return new Response(
+              JSON.stringify({ error: "LIMIT_REACHED", type: "threads" }),
+              { status: 403, headers: { "Content-Type": "application/json" } }
+            );
+          }
+        }
+      } catch {
+        // If plan check fails, allow the action
+      }
+
       if (!title || !content) {
         return new Response(
           JSON.stringify({ error: "Missing required fields: title, content" }),
@@ -170,6 +182,33 @@ export async function POST({ request }: { request: Request }) {
           status: 403,
           headers: { "Content-Type": "application/json" },
         });
+      }
+
+      // Plan limit check
+      try {
+        const elevatedGetAppInstance = auth.elevate(appInstances.getAppInstance);
+        const instanceResponse = await elevatedGetAppInstance();
+        const isFree = instanceResponse.instance?.isFree ?? true;
+        if (isFree) {
+          const countRes = await fetch(
+            `${supabaseUrl}/rest/v1/replies?site_id=eq.${encodeURIComponent(instanceId)}&select=id`,
+            {
+              headers: {
+                apikey: supabaseServiceRoleKey,
+                Authorization: `Bearer ${supabaseServiceRoleKey}`,
+              },
+            }
+          );
+          const rows = (await countRes.json()) as { id: string }[];
+          if (Array.isArray(rows) && rows.length >= 50) {
+            return new Response(
+              JSON.stringify({ error: "LIMIT_REACHED", type: "replies" }),
+              { status: 403, headers: { "Content-Type": "application/json" } }
+            );
+          }
+        }
+      } catch {
+        // If plan check fails, allow the action
       }
 
       const { thread_id } = body;
@@ -454,7 +493,7 @@ export async function GET({ request }: { request: Request }) {
               .catch(() => null)
           : Promise.resolve(null),
         fetch(
-          `${supabaseUrl}/rest/v1/threads?site_id=eq.${encodeURIComponent(instanceId)}&select=*&order=created_at.desc`,
+          `${supabaseUrl}/rest/v1/threads?site_id=eq.${encodeURIComponent(instanceId)}&select=*&order=is_pinned.desc,created_at.desc`,
           {
             headers: {
               apikey: supabaseServiceRoleKey,
@@ -485,7 +524,7 @@ export async function GET({ request }: { request: Request }) {
 
     } else if (action === "get_threads") {
       const response = await fetch(
-        `${supabaseUrl}/rest/v1/threads?site_id=eq.${encodeURIComponent(instanceId)}&select=*&order=created_at.desc`,
+        `${supabaseUrl}/rest/v1/threads?site_id=eq.${encodeURIComponent(instanceId)}&select=*&order=is_pinned.desc,created_at.desc`,
         {
           headers: {
             apikey: supabaseServiceRoleKey,
@@ -689,6 +728,332 @@ export async function GET({ request }: { request: Request }) {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
+
+    } else if (action === "admin_pin_thread") {
+      const threadId = url.searchParams.get("thread_id");
+      const pinValue = url.searchParams.get("pin"); // "true" or "false"
+
+      if (!threadId || pinValue === null) {
+        return new Response(JSON.stringify({ error: "Missing thread_id or pin" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const isPinned = pinValue === "true";
+
+      const patchResponse = await fetch(
+        `${supabaseUrl}/rest/v1/threads?id=eq.${encodeURIComponent(threadId)}&site_id=eq.${encodeURIComponent(instanceId)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          },
+          body: JSON.stringify({ is_pinned: isPinned }),
+        }
+      );
+
+      if (!patchResponse.ok) {
+        return new Response(JSON.stringify({ error: "Failed to update pin status" }), {
+          status: 502,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({ success: true, is_pinned: isPinned }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    } else if (action === "get_likes") {
+      const threadId = url.searchParams.get("thread_id");
+      const authHeader = request.headers.get("authorization");
+
+      let currentUserId: string | null = null;
+      if (authHeader) {
+        const tokenRes = await fetch("https://www.wixapis.com/oauth2/token-info", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: authHeader }),
+        });
+        if (tokenRes.ok) {
+          const info = (await tokenRes.json()) as { subjectId?: string; subjectType?: string };
+          if (info.subjectType === "MEMBER") {
+            currentUserId = info.subjectId ?? null;
+          }
+        }
+      }
+
+      if (!threadId) {
+        return new Response(JSON.stringify({ error: "Missing thread_id" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const likesRes = await fetch(
+        `${supabaseUrl}/rest/v1/thread_likes?thread_id=eq.${encodeURIComponent(threadId)}&site_id=eq.${encodeURIComponent(instanceId)}&select=user_id`,
+        {
+          headers: {
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          },
+        }
+      );
+
+      const likes = (await likesRes.json()) as { user_id: string }[];
+      const likeCount = Array.isArray(likes) ? likes.length : 0;
+      const likedByMe = currentUserId ? likes.some((l) => l.user_id === currentUserId) : false;
+
+      return new Response(JSON.stringify({ likeCount, likedByMe }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    } else if (action === "toggle_like") {
+      const threadId = url.searchParams.get("thread_id");
+      const authHeader = request.headers.get("authorization");
+
+      if (!threadId) {
+        return new Response(JSON.stringify({ error: "Missing thread_id" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (!authHeader) {
+        return new Response(JSON.stringify({ error: "Not authenticated" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const tokenRes = await fetch("https://www.wixapis.com/oauth2/token-info", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: authHeader }),
+      });
+
+      if (!tokenRes.ok) {
+        return new Response(JSON.stringify({ error: "Not authenticated" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const tokenData = (await tokenRes.json()) as { subjectId?: string; subjectType?: string };
+
+      if (tokenData.subjectType !== "MEMBER") {
+        return new Response(JSON.stringify({ error: "Members only" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const userId = tokenData.subjectId!;
+
+      const existingRes = await fetch(
+        `${supabaseUrl}/rest/v1/thread_likes?thread_id=eq.${encodeURIComponent(threadId)}&user_id=eq.${encodeURIComponent(userId)}&site_id=eq.${encodeURIComponent(instanceId)}&select=id`,
+        {
+          headers: {
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          },
+        }
+      );
+
+      const existing = (await existingRes.json()) as { id: string }[];
+      const alreadyLiked = Array.isArray(existing) && existing.length > 0;
+
+      if (alreadyLiked) {
+        await fetch(
+          `${supabaseUrl}/rest/v1/thread_likes?thread_id=eq.${encodeURIComponent(threadId)}&user_id=eq.${encodeURIComponent(userId)}&site_id=eq.${encodeURIComponent(instanceId)}`,
+          {
+            method: "DELETE",
+            headers: {
+              apikey: supabaseServiceRoleKey,
+              Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            },
+          }
+        );
+        return new Response(JSON.stringify({ liked: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } else {
+        await fetch(`${supabaseUrl}/rest/v1/thread_likes`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify({
+            thread_id: threadId,
+            user_id: userId,
+            site_id: instanceId,
+          }),
+        });
+        return new Response(JSON.stringify({ liked: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+    } else if (action === "get_reply_likes") {
+      const replyId = url.searchParams.get("reply_id");
+      const authHeader = request.headers.get("authorization");
+
+      let currentUserId: string | null = null;
+      if (authHeader) {
+        const tokenRes = await fetch("https://www.wixapis.com/oauth2/token-info", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: authHeader }),
+        });
+        if (tokenRes.ok) {
+          const info = (await tokenRes.json()) as { subjectId?: string; subjectType?: string };
+          if (info.subjectType === "MEMBER") {
+            currentUserId = info.subjectId ?? null;
+          }
+        }
+      }
+
+      if (!replyId) {
+        return new Response(JSON.stringify({ error: "Missing reply_id" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const likesRes = await fetch(
+        `${supabaseUrl}/rest/v1/reply_likes?reply_id=eq.${encodeURIComponent(replyId)}&site_id=eq.${encodeURIComponent(instanceId)}&select=user_id`,
+        {
+          headers: {
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          },
+        }
+      );
+
+      const likes = (await likesRes.json()) as { user_id: string }[];
+      const likeCount = Array.isArray(likes) ? likes.length : 0;
+      const likedByMe = currentUserId ? likes.some((l) => l.user_id === currentUserId) : false;
+
+      return new Response(JSON.stringify({ likeCount, likedByMe }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    } else if (action === "toggle_reply_like") {
+      const replyId = url.searchParams.get("reply_id");
+      const authHeader = request.headers.get("authorization");
+
+      if (!replyId) {
+        return new Response(JSON.stringify({ error: "Missing reply_id" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (!authHeader) {
+        return new Response(JSON.stringify({ error: "Not authenticated" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const tokenRes = await fetch("https://www.wixapis.com/oauth2/token-info", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: authHeader }),
+      });
+
+      if (!tokenRes.ok) {
+        return new Response(JSON.stringify({ error: "Not authenticated" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const tokenData = (await tokenRes.json()) as { subjectId?: string; subjectType?: string };
+
+      if (tokenData.subjectType !== "MEMBER") {
+        return new Response(JSON.stringify({ error: "Members only" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const userId = tokenData.subjectId!;
+
+      const existingRes = await fetch(
+        `${supabaseUrl}/rest/v1/reply_likes?reply_id=eq.${encodeURIComponent(replyId)}&user_id=eq.${encodeURIComponent(userId)}&site_id=eq.${encodeURIComponent(instanceId)}&select=id`,
+        {
+          headers: {
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          },
+        }
+      );
+
+      const existing = (await existingRes.json()) as { id: string }[];
+      const alreadyLiked = Array.isArray(existing) && existing.length > 0;
+
+      if (alreadyLiked) {
+        await fetch(
+          `${supabaseUrl}/rest/v1/reply_likes?reply_id=eq.${encodeURIComponent(replyId)}&user_id=eq.${encodeURIComponent(userId)}&site_id=eq.${encodeURIComponent(instanceId)}`,
+          {
+            method: "DELETE",
+            headers: {
+              apikey: supabaseServiceRoleKey,
+              Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            },
+          }
+        );
+        return new Response(JSON.stringify({ liked: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } else {
+        await fetch(`${supabaseUrl}/rest/v1/reply_likes`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify({
+            reply_id: replyId,
+            user_id: userId,
+            site_id: instanceId,
+          }),
+        });
+        return new Response(JSON.stringify({ liked: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+    } else if (action === "get_plan") {
+      try {
+        const elevatedGetAppInstance = auth.elevate(appInstances.getAppInstance);
+        const instanceResponse = await elevatedGetAppInstance();
+        const isFree = instanceResponse.instance?.isFree ?? true;
+        return new Response(JSON.stringify({ isFree }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch {
+        return new Response(JSON.stringify({ isFree: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
     } else {
       return new Response(JSON.stringify({ error: "Unsupported action" }), {

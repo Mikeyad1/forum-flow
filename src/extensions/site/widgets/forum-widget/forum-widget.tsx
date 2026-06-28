@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState, type FC } from 'react';
 import ReactDOM from 'react-dom';
 import reactToWebComponent from 'react-to-webcomponent';
 import { httpClient } from '@wix/essentials';
+import { window as siteWindow } from '@wix/site-window';
 import './style.css';
 
 type Thread = {
@@ -12,6 +13,9 @@ type Thread = {
   timestamp: string;
   body: string;
   user_id: string | null;
+  is_pinned: boolean;
+  likeCount: number;
+  likedByMe: boolean;
 };
 
 type ThreadRow = {
@@ -23,6 +27,7 @@ type ThreadRow = {
   user_id: string | null;
   reply_count: number | null;
   created_at: string | null;
+  is_pinned: boolean | null;
 };
 
 type Reply = {
@@ -31,6 +36,8 @@ type Reply = {
   body: string;
   timestamp: string;
   user_id: string | null;
+  likeCount: number;
+  likedByMe: boolean;
 };
 
 type ReplyRow = {
@@ -92,7 +99,13 @@ const formatTimestamp = (rawTimestamp: string | null): string => {
     return 'Unknown time';
   }
 
-  return parsed.toLocaleString();
+  return parsed.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 };
 
 const ForumWidget: FC<ForumWidgetProps> = ({
@@ -107,6 +120,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const baseApiUrl = new URL(import.meta.url).origin;
   console.log('[ForumFlow] ForumWidget mounted');
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [isEditorMode, setIsEditorMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showNewThreadForm, setShowNewThreadForm] = useState(false);
@@ -124,7 +138,19 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const [isReplySubmitting, setIsReplySubmitting] = useState(false);
   const [subjectType, setSubjectType] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [isFree, setIsFree] = useState(true);
   const [visitorName, setVisitorName] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const THREADS_PER_PAGE = 5;
+  const filteredThreads = threads.filter((t) =>
+    t.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+  const totalPages = Math.ceil(filteredThreads.length / THREADS_PER_PAGE);
+  const paginatedThreads = filteredThreads.slice(
+    (currentPage - 1) * THREADS_PER_PAGE,
+    currentPage * THREADS_PER_PAGE
+  );
 
   const identity = { subjectType, userId };
 
@@ -181,6 +207,9 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           timestamp: formatTimestamp(thread.created_at),
           body: thread.body ?? '',
           user_id: thread.user_id ?? null,
+          is_pinned: thread.is_pinned ?? false,
+          likeCount: 0,
+          likedByMe: false,
         }))
       );
     } finally {
@@ -215,13 +244,31 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         return;
       }
 
-      setReplies(
-        data.map((row) => ({
-          id: row.id,
-          author: row.user_name ?? row.author_name ?? 'Unknown author',
-          body: row.body ?? '',
-          timestamp: formatTimestamp(row.created_at),
-          user_id: row.user_id ?? null,
+      const mappedReplies = data.map((row) => ({
+        id: row.id,
+        author: row.user_name ?? row.author_name ?? 'Unknown author',
+        body: row.body ?? '',
+        timestamp: formatTimestamp(row.created_at),
+        user_id: row.user_id ?? null,
+        likeCount: 0,
+        likedByMe: false,
+      }));
+      setReplies(mappedReplies);
+
+      const replyLikesResults = await Promise.all(
+        mappedReplies.map((r) =>
+          httpClient.fetchWithAuth(
+            `${baseApiUrl}/api/forum?action=get_reply_likes&reply_id=${encodeURIComponent(r.id)}`
+          )
+          .then((res) => res.ok ? res.json() as Promise<{ likeCount: number; likedByMe: boolean }> : { likeCount: 0, likedByMe: false })
+          .catch(() => ({ likeCount: 0, likedByMe: false }))
+        )
+      );
+      setReplies((prev) =>
+        prev.map((r, i) => ({
+          ...r,
+          likeCount: replyLikesResults[i]?.likeCount ?? 0,
+          likedByMe: replyLikesResults[i]?.likedByMe ?? false,
         }))
       );
     } finally {
@@ -232,6 +279,13 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   useEffect(() => {
     let cancelled = false;
     const loadAll = async () => {
+      const viewMode = await siteWindow.viewMode();
+      if (viewMode !== 'Site') {
+        setIsEditorMode(true);
+        setIsLoading(false);
+        return;
+      }
+
       setIsLoading(true);
       setErrorMessage(null);
       try {
@@ -252,6 +306,15 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         if (cancelled) return;
         setSubjectType(data.subjectType ?? null);
         setUserId(data.userId ?? null);
+
+        const planRes = await httpClient.fetchWithAuth(
+          `${baseApiUrl}/api/forum?action=get_plan`
+        );
+        if (planRes.ok) {
+          const planData = (await planRes.json()) as { isFree: boolean };
+          if (!cancelled) setIsFree(planData.isFree ?? true);
+        }
+
         setThreads(
           data.threads.map((thread: ThreadRow) => ({
             id: thread.id,
@@ -261,8 +324,30 @@ const ForumWidget: FC<ForumWidgetProps> = ({
             timestamp: formatTimestamp(thread.created_at),
             body: thread.body ?? '',
             user_id: thread.user_id ?? null,
+          is_pinned: thread.is_pinned ?? false,
+          likeCount: 0,
+          likedByMe: false,
           }))
         );
+
+        const threadIds = data.threads.map((t: ThreadRow) => t.id);
+        if (threadIds.length > 0) {
+          const likesResults = await Promise.all(
+            threadIds.map((id: string) =>
+              httpClient.fetchWithAuth(
+                `${baseApiUrl}/api/forum?action=get_likes&thread_id=${encodeURIComponent(id)}`
+              ).then((r) => r.ok ? r.json() as Promise<{ likeCount: number; likedByMe: boolean }> : { likeCount: 0, likedByMe: false })
+              .catch(() => ({ likeCount: 0, likedByMe: false }))
+            )
+          );
+          setThreads((prev) =>
+            prev.map((t, i) => ({
+              ...t,
+              likeCount: likesResults[i]?.likeCount ?? 0,
+              likedByMe: likesResults[i]?.likedByMe ?? false,
+            }))
+          );
+        }
       } catch {
         if (!cancelled) setErrorMessage('Could not load forum.');
       } finally {
@@ -338,6 +423,13 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       });
 
       if (!response.ok) {
+        if (response.status === 403) {
+          const errData = (await response.json()) as { error?: string; type?: string };
+          if (errData.error === 'LIMIT_REACHED') {
+            setFormError(subjectType === 'APP' ? 'You have reached the 25-thread limit on the free plan. Upgrade to Pro for unlimited threads.' : 'Something went wrong. Please try again later.');
+            return;
+          }
+        }
         setFormError(
           response.status === 401
             ? 'You need to log in to create a thread.'
@@ -420,6 +512,106 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     }
   };
 
+  const handleToggleLike = useCallback(async (threadId: string) => {
+    if (subjectType !== 'MEMBER') return;
+
+    // Optimistic update — update UI immediately
+    setThreads((prev) =>
+      prev.map((t) =>
+        t.id === threadId
+          ? {
+              ...t,
+              likedByMe: !t.likedByMe,
+              likeCount: !t.likedByMe ? t.likeCount + 1 : Math.max(0, t.likeCount - 1),
+            }
+          : t
+      )
+    );
+
+    try {
+      const response = await httpClient.fetchWithAuth(
+        `${baseApiUrl}/api/forum?action=toggle_like&thread_id=${encodeURIComponent(threadId)}`
+      );
+      if (!response.ok) {
+        // Revert on failure
+        setThreads((prev) =>
+          prev.map((t) =>
+            t.id === threadId
+              ? {
+                  ...t,
+                  likedByMe: !t.likedByMe,
+                  likeCount: !t.likedByMe ? t.likeCount + 1 : Math.max(0, t.likeCount - 1),
+                }
+              : t
+          )
+        );
+      }
+    } catch {
+      // Revert on error
+      setThreads((prev) =>
+        prev.map((t) =>
+          t.id === threadId
+            ? {
+                ...t,
+                likedByMe: !t.likedByMe,
+                likeCount: !t.likedByMe ? t.likeCount + 1 : Math.max(0, t.likeCount - 1),
+              }
+            : t
+        )
+      );
+    }
+  }, [baseApiUrl, subjectType]);
+
+  const handleToggleReplyLike = useCallback(async (replyId: string) => {
+    if (subjectType !== 'MEMBER') return;
+
+    // Optimistic update
+    setReplies((prev) =>
+      prev.map((r) =>
+        r.id === replyId
+          ? {
+              ...r,
+              likedByMe: !r.likedByMe,
+              likeCount: !r.likedByMe ? r.likeCount + 1 : Math.max(0, r.likeCount - 1),
+            }
+          : r
+      )
+    );
+
+    try {
+      const response = await httpClient.fetchWithAuth(
+        `${baseApiUrl}/api/forum?action=toggle_reply_like&reply_id=${encodeURIComponent(replyId)}`
+      );
+      if (!response.ok) {
+        // Revert on failure
+        setReplies((prev) =>
+          prev.map((r) =>
+            r.id === replyId
+              ? {
+                  ...r,
+                  likedByMe: !r.likedByMe,
+                  likeCount: !r.likedByMe ? r.likeCount + 1 : Math.max(0, r.likeCount - 1),
+                }
+              : r
+          )
+        );
+      }
+    } catch {
+      // Revert on error
+      setReplies((prev) =>
+        prev.map((r) =>
+          r.id === replyId
+            ? {
+                ...r,
+                likedByMe: !r.likedByMe,
+                likeCount: !r.likedByMe ? r.likeCount + 1 : Math.max(0, r.likeCount - 1),
+              }
+            : r
+        )
+      );
+    }
+  }, [baseApiUrl, subjectType]);
+
   const handleSubmitReply = async () => {
     if (!detailThread) {
       return;
@@ -443,6 +635,13 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       });
 
       if (!response.ok) {
+        if (response.status === 403) {
+          const errData = (await response.json()) as { error?: string; type?: string };
+          if (errData.error === 'LIMIT_REACHED') {
+            setReplyFormError(subjectType === 'APP' ? 'You have reached the 50-reply limit on the free plan. Upgrade to Pro for unlimited replies.' : 'Something went wrong. Please try again later.');
+            return;
+          }
+        }
         setReplyFormError(
           response.status === 401
             ? 'You need to log in to post a reply.'
@@ -681,7 +880,14 @@ const ForumWidget: FC<ForumWidgetProps> = ({
               Replies
             </p>
             {repliesLoading ? (
-              <p style={{ margin: 0, fontSize: '14px', color: '#4b5563' }}>Loading replies...</p>
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '8px' }}>
+                {[1, 2].map((i) => (
+                  <li key={i} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '10px', backgroundColor: '#f9fafb' }}>
+                    <div className="forum-skeleton-bar" style={{ height: '12px', borderRadius: '6px', backgroundColor: '#e5e7eb', marginBottom: '8px', width: '30%' }} />
+                    <div className="forum-skeleton-bar" style={{ height: '14px', borderRadius: '6px', backgroundColor: '#e5e7eb', width: `${60 + i * 15}%` }} />
+                  </li>
+                ))}
+              </ul>
             ) : repliesError ? (
               <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{repliesError}</p>
             ) : (
@@ -752,6 +958,25 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                       >
                         {reply.body}
                       </p>
+                      {(subjectType === 'MEMBER' || reply.likeCount > 0) && (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontSize: '12px',
+                            color: reply.likedByMe ? color : '#9ca3af',
+                            cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
+                            marginTop: '4px',
+                            transition: 'transform 0.15s ease, color 0.15s ease',
+                          }}
+                          onClick={() => { if (subjectType === 'MEMBER') void handleToggleReplyLike(reply.id); }}
+                          onMouseDown={(e) => { if (subjectType === 'MEMBER') e.currentTarget.style.transform = 'scale(1.4)'; }}
+                          onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                        >
+                          {reply.likedByMe ? '❤️' : '🤍'} {reply.likeCount > 0 ? reply.likeCount : ''}
+                        </span>
+                      )}
                     </li>
                   ))
                 )}
@@ -865,6 +1090,11 @@ const ForumWidget: FC<ForumWidgetProps> = ({
             </>
           )}
         </div>
+      ) : isEditorMode ? (
+        <div style={{ padding: '32px 16px', textAlign: 'center', color: '#6b7280', fontSize: '14px', lineHeight: 1.6 }}>
+          <p style={{ margin: '0 0 6px', fontSize: '20px' }}>📋</p>
+          <p style={{ margin: 0 }}>Your forum threads will appear on your live site.</p>
+        </div>
       ) : isLoading ? (
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '10px' }}>
           {[1, 2, 3].map((i) => (
@@ -902,8 +1132,48 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       ) : errorMessage ? (
         <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{errorMessage}</p>
       ) : (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '10px' }}>
-          {threads.length === 0 ? (
+        <>
+          <div style={{ position: 'relative', marginBottom: '10px' }}>
+            <input
+              type="text"
+              placeholder="Search threads…"
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                padding: '8px 32px 8px 10px',
+                fontSize: '14px',
+                fontFamily: 'inherit',
+                color: '#111827',
+              }}
+            />
+            {searchQuery.length > 0 && (
+              <button
+                type="button"
+                onClick={() => { setSearchQuery(''); setCurrentPage(1); }}
+                style={{
+                  position: 'absolute',
+                  right: '8px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  border: 'none',
+                  background: 'none',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  color: '#9ca3af',
+                  padding: '2px',
+                  lineHeight: 1,
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '10px' }}>
+          {paginatedThreads.length === 0 ? (
             <li
               style={{
                 border: '1px solid #e5e7eb',
@@ -914,10 +1184,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                 color: '#4b5563',
               }}
             >
-              No threads yet.
+              {threads.length === 0 ? 'No threads yet.' : 'No threads match your search.'}
             </li>
           ) : (
-            threads.map((thread) => (
+            paginatedThreads.map((thread) => (
               <li
                 key={thread.id}
                 role="button"
@@ -947,13 +1217,37 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ margin: '0 0 6px', fontSize: '15px', fontWeight: 600 }}>
-                      {thread.title}
+                      {thread.is_pinned ? '📌 ' : ''}{thread.title}
                     </p>
                     <p style={{ margin: 0, fontSize: '13px', color: '#4b5563' }}>
                       {thread.author} •{' '}
                       {thread.replies === 1 ? '1 reply' : `${thread.replies} replies`} •{' '}
                       {thread.timestamp}
                     </p>
+                    {(subjectType === 'MEMBER' || thread.likeCount > 0) && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontSize: '13px',
+                          color: thread.likedByMe ? color : '#9ca3af',
+                          cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
+                          marginTop: '4px',
+                          transition: 'transform 0.15s ease, color 0.15s ease',
+                          transform: 'scale(1)',
+                        }}
+                        onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(1.4)'; }}
+                        onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                        onClick={(e) => {
+                          if (subjectType !== 'MEMBER') return;
+                          e.stopPropagation();
+                          void handleToggleLike(thread.id);
+                        }}
+                      >
+                        {thread.likedByMe ? '❤️' : '🤍'} {thread.likeCount > 0 ? thread.likeCount : ''}
+                      </span>
+                    )}
                   </div>
                   {canDeleteContent(thread.user_id) ? (
                     <button
@@ -971,6 +1265,68 @@ const ForumWidget: FC<ForumWidgetProps> = ({
             ))
           )}
         </ul>
+        {totalPages > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginTop: '12px' }}>
+            <button
+              type="button"
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              style={{
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                backgroundColor: '#ffffff',
+                color: currentPage === 1 ? '#9ca3af' : '#374151',
+                fontSize: '14px',
+                fontWeight: 600,
+                padding: '6px 12px',
+                cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+              }}
+            >
+              ←
+            </button>
+            <span style={{ fontSize: '13px', color: '#6b7280' }}>
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              style={{
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                backgroundColor: '#ffffff',
+                color: currentPage === totalPages ? '#9ca3af' : '#374151',
+                fontSize: '14px',
+                fontWeight: 600,
+                padding: '6px 12px',
+                cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+              }}
+            >
+              →
+            </button>
+          </div>
+        )}
+        </>
+      )}
+      {isFree && (
+        <div style={{
+          marginTop: '12px',
+          paddingTop: '10px',
+          borderTop: '1px solid #e5e7eb',
+          textAlign: 'center',
+          fontSize: '11px',
+          color: '#9ca3af',
+        }}>
+          Powered by{' '}
+          <a
+            href="https://www.wix.com/app-market/forumflow"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#9ca3af', textDecoration: 'underline' }}
+          >
+            ForumFlow
+          </a>
+        </div>
       )}
     </section>
   );
