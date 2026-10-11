@@ -61,6 +61,7 @@ type ForumWidgetProps = {
   who_can_post_replies?: string;
   members_can_delete?: boolean | string;
   threads_per_page?: number | string;
+  reply_notifications?: boolean | string;
 };
 
 const parseBooleanProp = (value: boolean | string | undefined, defaultValue: boolean): boolean => {
@@ -121,8 +122,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   who_can_post_replies = 'everyone',
   members_can_delete = true,
   threads_per_page = '10',
+  reply_notifications = true,
 }) => {
   const membersCanDelete = parseBooleanProp(members_can_delete, true);
+  const replyNotificationsOn = parseBooleanProp(reply_notifications, true);
   const baseApiUrl = new URL(import.meta.url).origin;
   console.log('[ForumFlow] ForumWidget mounted');
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -823,6 +826,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           who_can_post_threads,
           who_can_post_replies,
           page_url: window.location.href,
+          reply_notifications: replyNotificationsOn ? 'true' : 'false',
         }),
       });
 
@@ -1508,7 +1512,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{errorMessage}</p>
       ) : (
         <>
-          {subjectType === 'MEMBER' && notifyEnabled !== null && (
+          {subjectType === 'MEMBER' && notifyEnabled !== null && replyNotificationsOn && (
             <label
               style={{
                 display: 'flex',
@@ -1751,7 +1755,7 @@ const customElement = reactToWebComponent(
   React,
   ReactDOM as any,
   {
-    props: ['title', 'new_thread_label', 'color', 'who_can_post_threads', 'who_can_post_replies', 'members_can_delete', 'threads_per_page'],
+    props: ['title', 'new_thread_label', 'color', 'who_can_post_threads', 'who_can_post_replies', 'members_can_delete', 'threads_per_page', 'reply_notifications'],
   }
 );
 customElements.define('forum-widget', customElement);

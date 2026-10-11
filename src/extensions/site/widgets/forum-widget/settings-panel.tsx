@@ -11,6 +11,7 @@ const DEFAULT_THREADS_AUDIENCE: PostingAudience = 'everyone';
 const DEFAULT_REPLIES_AUDIENCE: PostingAudience = 'everyone';
 const DEFAULT_MEMBERS_CAN_DELETE = true;
 const DEFAULT_THREADS_PER_PAGE = '10';
+const DEFAULT_REPLY_NOTIFICATIONS = true;
 const THREADS_PER_PAGE_OPTIONS = ['5', '10', '15', '20', '30'];
 
 const SETTINGS_CONTAINER_STYLE: React.CSSProperties = {
@@ -73,6 +74,7 @@ const SettingsPanel: FC = () => {
   );
   const [membersCanDelete, setMembersCanDelete] = useState(DEFAULT_MEMBERS_CAN_DELETE);
   const [threadsPerPage, setThreadsPerPage] = useState(DEFAULT_THREADS_PER_PAGE);
+  const [replyNotifications, setReplyNotifications] = useState(DEFAULT_REPLY_NOTIFICATIONS);
 
   useEffect(() => {
     let isMounted = true;
@@ -86,6 +88,7 @@ const SettingsPanel: FC = () => {
         savedReplyAudience,
         savedMembersCanDelete,
         savedThreadsPerPage,
+        savedReplyNotifications,
       ] = await Promise.all([
         client.widget.getProp('title'),
         client.widget.getProp('new_thread_label'),
@@ -94,6 +97,7 @@ const SettingsPanel: FC = () => {
         client.widget.getProp('who_can_post_replies'),
         client.widget.getProp('members_can_delete'),
         client.widget.getProp('threads_per_page'),
+        client.widget.getProp('reply_notifications'),
       ]);
 
       if (!isMounted) {
@@ -112,6 +116,7 @@ const SettingsPanel: FC = () => {
       setMembersCanDelete(parseBooleanProp(savedMembersCanDelete, DEFAULT_MEMBERS_CAN_DELETE));
       const perPageStr = savedThreadsPerPage != null ? String(savedThreadsPerPage) : '';
       setThreadsPerPage(THREADS_PER_PAGE_OPTIONS.includes(perPageStr) ? perPageStr : DEFAULT_THREADS_PER_PAGE);
+      setReplyNotifications(parseBooleanProp(savedReplyNotifications, DEFAULT_REPLY_NOTIFICATIONS));
     };
 
     void loadProps();
@@ -154,6 +159,12 @@ const SettingsPanel: FC = () => {
     const nextValue = event.target.checked;
     setMembersCanDelete(nextValue);
     await client.widget.setProp('members_can_delete', String(nextValue));
+  };
+
+  const updateReplyNotifications = async (event: ChangeEvent<HTMLInputElement>) => {
+    const nextValue = event.target.checked;
+    setReplyNotifications(nextValue);
+    await client.widget.setProp('reply_notifications', String(nextValue));
   };
 
   const updateThreadsPerPage = async (event: ChangeEvent<HTMLSelectElement>) => {
@@ -211,6 +222,14 @@ const SettingsPanel: FC = () => {
           onChange={updateMembersCanDelete}
         />
         Members can delete their own posts
+      </label>
+      <label style={{ ...LABEL_STYLE, gridTemplateColumns: 'auto 1fr', alignItems: 'center' }}>
+        <input
+          type="checkbox"
+          checked={replyNotifications}
+          onChange={updateReplyNotifications}
+        />
+        Email members when someone replies to their threads
       </label>
     </section>
   );
