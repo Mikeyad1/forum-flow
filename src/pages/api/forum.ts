@@ -12,6 +12,8 @@ type CreateThreadBody = {
   visitor_name?: string;
   who_can_post_threads?: string;
   who_can_post_replies?: string;
+  page_url?: string;
+  reply_notifications?: string | boolean;
 };
 
 export async function POST({ request }: { request: Request }) {
@@ -264,6 +266,113 @@ export async function POST({ request }: { request: Request }) {
       const created = (await supabaseResponse.json()) as unknown;
       const createdReply =
         Array.isArray(created) && created.length > 0 ? created[0] : created;
+
+      // Reply notification (best-effort): must never fail the reply
+      try {
+        const notifyEnabled =
+          body.reply_notifications !== "false" && body.reply_notifications !== false;
+        const resendApiKey = import.meta.env.RESEND_API_KEY as string | undefined;
+
+        let pageUrl: string | null = null;
+        try {
+          const parsedUrl = new URL(String(body.page_url ?? ""));
+          if (parsedUrl.protocol === "https:") {
+            pageUrl = parsedUrl.toString();
+          }
+        } catch {
+          pageUrl = null;
+        }
+
+        if (!notifyEnabled || !resendApiKey || !pageUrl) {
+          console.log("[ForumFlow] notify: skipped", {
+            notifyEnabled,
+            hasKey: !!resendApiKey,
+            hasPageUrl: !!pageUrl,
+          });
+        } else {
+          const sbHeaders = {
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          };
+
+          const threadInfoRes = await fetch(
+            `${supabaseUrl}/rest/v1/threads?id=eq.${encodeURIComponent(String(thread_id))}&site_id=eq.${encodeURIComponent(instanceId)}&select=user_id,author_type,title`,
+            { headers: sbHeaders }
+          );
+          const threadInfoRows = threadInfoRes.ok
+            ? ((await threadInfoRes.json()) as { user_id?: string | null; author_type?: string | null; title?: string | null }[])
+            : [];
+          const threadInfo = Array.isArray(threadInfoRows) && threadInfoRows.length > 0 ? threadInfoRows[0] : null;
+          const authorId = threadInfo?.user_id ?? null;
+
+          if (!threadInfo || !authorId || authorId === "system" || threadInfo.author_type !== "MEMBER" || authorId === userId) {
+            console.log("[ForumFlow] notify: skipped (no eligible author)");
+          } else {
+            const optoutRes = await fetch(
+              `${supabaseUrl}/rest/v1/notification_optouts?site_id=eq.${encodeURIComponent(instanceId)}&user_id=eq.${encodeURIComponent(authorId)}&select=user_id`,
+              { headers: sbHeaders }
+            );
+            const optoutRows = optoutRes.ok ? ((await optoutRes.json()) as unknown[]) : [];
+            const optedOut = Array.isArray(optoutRows) && optoutRows.length > 0;
+
+            if (optedOut) {
+              console.log("[ForumFlow] notify: skipped (opted out)");
+            } else {
+              const authorMember = await elevatedGetMember(authorId, { fieldsets: ["FULL"] });
+              const authorEmail = authorMember?.loginEmail ?? "";
+
+              if (!authorEmail) {
+                console.log("[ForumFlow] notify: skipped (no email)");
+              } else {
+                const esc = (s: string) =>
+                  s
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#39;");
+                const oneLine = (s: string) => s.replace(/[\r\n]+/g, " ").trim();
+
+                const threadTitle = oneLine(threadInfo.title ?? "your thread").slice(0, 120);
+                const replierName = oneLine(userName).slice(0, 50);
+                const replyText = String(content);
+                const snippet = replyText.length > 300 ? `${replyText.slice(0, 300)}…` : replyText;
+
+                const html = `
+                  <div style="font-family: Arial, sans-serif; font-size: 15px; color: #111827; line-height: 1.5;">
+                    <p><strong>${esc(replierName)}</strong> replied to your thread <strong>"${esc(threadTitle)}"</strong>:</p>
+                    <blockquote style="margin: 12px 0; padding: 10px 14px; border-left: 3px solid #d1d5db; color: #374151; white-space: pre-wrap;">${esc(snippet)}</blockquote>
+                    <p><a href="${esc(pageUrl)}">View the reply</a></p>
+                    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
+                    <p style="font-size: 12px; color: #6b7280;">You're receiving this because you started this thread. <a href="${esc(pageUrl)}" style="color: #6b7280;">Manage notifications</a></p>
+                  </div>
+                `;
+
+                const text = `${replierName} replied to your thread "${threadTitle}":\n\n${snippet}\n\nView the reply: ${pageUrl}\n\nYou're receiving this because you started this thread. Manage notifications: ${pageUrl}`;
+
+                const emailRes = await fetch("https://api.resend.com/emails", {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${resendApiKey}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    from: "ForumFlow <notifications@brivanolabs.com>",
+                    to: authorEmail,
+                    subject: `${replierName} replied to your thread "${threadTitle}"`,
+                    html,
+                    text,
+                  }),
+                });
+
+                console.log("[ForumFlow] notify: sent", { ok: emailRes.ok, status: emailRes.status });
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.log("[ForumFlow] notify: error", err instanceof Error ? err.message : String(err));
+      }
 
       return new Response(JSON.stringify(createdReply), {
         status: 201,
@@ -1364,6 +1473,92 @@ export async function GET({ request }: { request: Request }) {
           headers: { "Content-Type": "application/json" },
         });
       }
+
+    } else if (action === "get_notify_pref") {
+      if (tokenInfo.subjectType !== "MEMBER" || !tokenInfo.subjectId) {
+        return new Response(JSON.stringify({ eligible: false, enabled: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const prefRes = await fetch(
+        `${supabaseUrl}/rest/v1/notification_optouts?site_id=eq.${encodeURIComponent(instanceId)}&user_id=eq.${encodeURIComponent(tokenInfo.subjectId)}&select=user_id`,
+        {
+          headers: {
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          },
+        }
+      );
+
+      if (!prefRes.ok) {
+        return new Response(JSON.stringify({ error: "Failed to load notification preference" }), {
+          status: 502,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const prefRows = (await prefRes.json()) as unknown[];
+      const optedOut = Array.isArray(prefRows) && prefRows.length > 0;
+
+      return new Response(JSON.stringify({ eligible: true, enabled: !optedOut }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    } else if (action === "set_notify_pref") {
+      if (tokenInfo.subjectType !== "MEMBER" || !tokenInfo.subjectId) {
+        return new Response(JSON.stringify({ error: "Members only" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const enabledParam = url.searchParams.get("enabled");
+      if (enabledParam !== "true" && enabledParam !== "false") {
+        return new Response(JSON.stringify({ error: "Missing or invalid enabled" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      let prefWriteRes: Response;
+      if (enabledParam === "false") {
+        prefWriteRes = await fetch(`${supabaseUrl}/rest/v1/notification_optouts?on_conflict=site_id,user_id`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            Prefer: "resolution=ignore-duplicates,return=minimal",
+          },
+          body: JSON.stringify({ site_id: instanceId, user_id: tokenInfo.subjectId }),
+        });
+      } else {
+        prefWriteRes = await fetch(
+          `${supabaseUrl}/rest/v1/notification_optouts?site_id=eq.${encodeURIComponent(instanceId)}&user_id=eq.${encodeURIComponent(tokenInfo.subjectId)}`,
+          {
+            method: "DELETE",
+            headers: {
+              apikey: supabaseServiceRoleKey,
+              Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            },
+          }
+        );
+      }
+
+      if (!prefWriteRes.ok) {
+        return new Response(JSON.stringify({ error: "Failed to update notification preference" }), {
+          status: 502,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({ success: true, enabled: enabledParam === "true" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
 
     } else if (action === "get_plan") {
       try {

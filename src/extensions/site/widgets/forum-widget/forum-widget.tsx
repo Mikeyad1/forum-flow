@@ -158,6 +158,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const [isEditReplySaving, setIsEditReplySaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [notifyEnabled, setNotifyEnabled] = useState<boolean | null>(null);
+  const [notifySaving, setNotifySaving] = useState(false);
   const parsedPerPage = Number(threads_per_page);
   const THREADS_PER_PAGE =
     Number.isFinite(parsedPerPage) && parsedPerPage >= 1 && parsedPerPage <= 50
@@ -371,6 +373,17 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         setSubjectType(data.subjectType ?? null);
         setUserId(data.userId ?? null);
         setStaffUserIds(Array.isArray(data.staffUserIds) ? data.staffUserIds : []);
+        if (data.subjectType === 'MEMBER') {
+          httpClient
+            .fetchWithAuth(`${baseApiUrl}/api/forum?action=get_notify_pref`)
+            .then((r) => (r.ok ? (r.json() as Promise<{ eligible?: boolean; enabled?: boolean }>) : null))
+            .then((pref) => {
+              if (!cancelled && pref?.eligible) {
+                setNotifyEnabled(pref.enabled ?? true);
+              }
+            })
+            .catch(() => {});
+        }
 
         const planRes = await httpClient.fetchWithAuth(
           `${baseApiUrl}/api/forum?action=get_plan`
@@ -771,6 +784,25 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     }
   }, [baseApiUrl, subjectType]);
 
+  const handleToggleNotify = async () => {
+    if (notifyEnabled === null || notifySaving) return;
+    const next = !notifyEnabled;
+    setNotifyEnabled(next);
+    setNotifySaving(true);
+    try {
+      const res = await httpClient.fetchWithAuth(
+        `${baseApiUrl}/api/forum?action=set_notify_pref&enabled=${next ? 'true' : 'false'}`
+      );
+      if (!res.ok) {
+        setNotifyEnabled(!next);
+      }
+    } catch {
+      setNotifyEnabled(!next);
+    } finally {
+      setNotifySaving(false);
+    }
+  };
+
   const handleSubmitReply = async () => {
     if (!detailThread) {
       return;
@@ -790,6 +822,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           visitor_name: visitorName,
           who_can_post_threads,
           who_can_post_replies,
+          page_url: window.location.href,
         }),
       });
 
@@ -1475,6 +1508,28 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{errorMessage}</p>
       ) : (
         <>
+          {subjectType === 'MEMBER' && notifyEnabled !== null && (
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '13px',
+                color: '#4b5563',
+                marginBottom: '10px',
+                cursor: notifySaving ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={notifyEnabled}
+                disabled={notifySaving}
+                onChange={() => void handleToggleNotify()}
+                style={{ accentColor: color }}
+              />
+              Email me when someone replies to my threads
+            </label>
+          )}
           <div style={{ position: 'relative', marginBottom: '10px' }}>
             <input
               type="text"
