@@ -330,14 +330,25 @@ const ForumWidget: FC<ForumWidgetProps> = ({
 
   useEffect(() => {
     let cancelled = false;
+    let viewModeResolved = false;
+    const editorFallbackTimer = setTimeout(() => {
+      if (!viewModeResolved && !cancelled) {
+        setIsEditorMode(true);
+        setIsLoading(false);
+      }
+    }, 2000);
     const loadAll = async () => {
       const viewMode = await siteWindow.viewMode();
+      viewModeResolved = true;
+      clearTimeout(editorFallbackTimer);
+      if (cancelled) return;
       if (viewMode !== 'Site') {
         setIsEditorMode(true);
         setIsLoading(false);
         return;
       }
 
+      setIsEditorMode(false);
       setIsLoading(true);
       setErrorMessage(null);
       try {
@@ -410,7 +421,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       }
     };
     void loadAll();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(editorFallbackTimer); };
   }, [baseApiUrl]);
 
   useEffect(() => {
