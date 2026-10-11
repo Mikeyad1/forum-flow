@@ -681,7 +681,70 @@ export async function GET({ request }: { request: Request }) {
         );
       }
 
-      const threads = await threadsResponse.json();
+      let threads = (await threadsResponse.json()) as unknown[];
+
+      // Seed demo threads the first time a site's forum loads with no threads
+      if (Array.isArray(threads) && threads.length === 0) {
+        try {
+          const seedMarkRes = await fetch(
+            `${supabaseUrl}/rest/v1/seeded_sites?on_conflict=site_id`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                apikey: supabaseServiceRoleKey,
+                Authorization: `Bearer ${supabaseServiceRoleKey}`,
+                Prefer: "resolution=ignore-duplicates,return=representation",
+              },
+              body: JSON.stringify({ site_id: instanceId }),
+            }
+          );
+          const seedMarkRows = seedMarkRes.ok ? ((await seedMarkRes.json()) as unknown[]) : [];
+          const isFirstSeed = Array.isArray(seedMarkRows) && seedMarkRows.length > 0;
+
+          if (isFirstSeed) {
+            const nowMs = Date.now();
+            const demoInsertRes = await fetch(`${supabaseUrl}/rest/v1/threads`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                apikey: supabaseServiceRoleKey,
+                Authorization: `Bearer ${supabaseServiceRoleKey}`,
+                Prefer: "return=representation",
+              },
+              body: JSON.stringify([
+                {
+                  site_id: instanceId,
+                  title: "Welcome to the forum! 👋",
+                  body: "This is your community space — feel free to introduce yourself, ask questions, or start a conversation. We're glad you're here!",
+                  author_name: "ForumFlow",
+                  user_name: "ForumFlow",
+                  user_id: "system",
+                  created_at: new Date(nowMs).toISOString(),
+                },
+                {
+                  site_id: instanceId,
+                  title: "What would you like to discuss here?",
+                  body: 'This is just an example thread to show you what ForumFlow looks like. Click "New Thread" to start your own conversation!',
+                  author_name: "ForumFlow",
+                  user_name: "ForumFlow",
+                  user_id: "system",
+                  created_at: new Date(nowMs - 1000).toISOString(),
+                },
+              ]),
+            });
+            if (demoInsertRes.ok) {
+              const inserted = (await demoInsertRes.json()) as unknown[];
+              if (Array.isArray(inserted)) {
+                threads = inserted;
+              }
+            }
+          }
+        } catch {
+          // Seeding is best-effort; never block loading the forum
+        }
+      }
+
       let staffUserIds: string[] = [];
       if (staffResponse.ok) {
         const staffRows = (await staffResponse.json()) as { user_id: string }[];
