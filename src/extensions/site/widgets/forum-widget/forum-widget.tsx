@@ -16,6 +16,7 @@ type Thread = {
   is_pinned: boolean;
   likeCount: number;
   likedByMe: boolean;
+  edited: boolean;
 };
 
 type ThreadRow = {
@@ -28,6 +29,7 @@ type ThreadRow = {
   reply_count: number | null;
   created_at: string | null;
   is_pinned: boolean | null;
+  edited_at?: string | null;
 };
 
 type Reply = {
@@ -38,6 +40,7 @@ type Reply = {
   user_id: string | null;
   likeCount: number;
   likedByMe: boolean;
+  edited: boolean;
 };
 
 type ReplyRow = {
@@ -47,6 +50,7 @@ type ReplyRow = {
   user_name: string | null;
   user_id: string | null;
   created_at: string | null;
+  edited_at?: string | null;
 };
 
 type ForumWidgetProps = {
@@ -56,6 +60,7 @@ type ForumWidgetProps = {
   who_can_post_threads?: string;
   who_can_post_replies?: string;
   members_can_delete?: boolean | string;
+  threads_per_page?: number | string;
 };
 
 const parseBooleanProp = (value: boolean | string | undefined, defaultValue: boolean): boolean => {
@@ -99,11 +104,11 @@ const formatTimestamp = (rawTimestamp: string | null): string => {
     return 'Unknown time';
   }
 
-  return parsed.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'numeric',
+  return parsed.toLocaleString('en-US', {
+    month: 'short',
     day: 'numeric',
-    hour: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
     minute: '2-digit',
   });
 };
@@ -115,6 +120,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   who_can_post_threads = 'everyone',
   who_can_post_replies = 'everyone',
   members_can_delete = true,
+  threads_per_page = '10',
 }) => {
   const membersCanDelete = parseBooleanProp(members_can_delete, true);
   const baseApiUrl = new URL(import.meta.url).origin;
@@ -138,14 +144,29 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const [isReplySubmitting, setIsReplySubmitting] = useState(false);
   const [subjectType, setSubjectType] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [staffUserIds, setStaffUserIds] = useState<string[]>([]);
   const [isFree, setIsFree] = useState(true);
   const [visitorName, setVisitorName] = useState('');
+  const [isEditingThread, setIsEditingThread] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editBody, setEditBody] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+  const [isEditSaving, setIsEditSaving] = useState(false);
+  const [editingReplyId, setEditingReplyId] = useState<string | null>(null);
+  const [editReplyBody, setEditReplyBody] = useState('');
+  const [editReplyError, setEditReplyError] = useState<string | null>(null);
+  const [isEditReplySaving, setIsEditReplySaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const THREADS_PER_PAGE = 5;
-  const filteredThreads = threads.filter((t) =>
-    t.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const parsedPerPage = Number(threads_per_page);
+  const THREADS_PER_PAGE =
+    Number.isFinite(parsedPerPage) && parsedPerPage >= 1 && parsedPerPage <= 50
+      ? Math.floor(parsedPerPage)
+      : 10;
+  const filteredThreads = threads.filter((t) => {
+    const q = searchQuery.toLowerCase();
+    return t.title.toLowerCase().includes(q) || t.body.toLowerCase().includes(q);
+  });
   const totalPages = Math.ceil(filteredThreads.length / THREADS_PER_PAGE);
   const paginatedThreads = filteredThreads.slice(
     (currentPage - 1) * THREADS_PER_PAGE,
@@ -153,6 +174,28 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   );
 
   const identity = { subjectType, userId };
+
+  const isStaff = (ownerUserId: string | null): boolean =>
+    !!ownerUserId && staffUserIds.includes(ownerUserId);
+
+  const staffBadge = (
+    <span
+      style={{
+        display: 'inline-block',
+        marginLeft: '6px',
+        padding: '1px 6px',
+        borderRadius: '9999px',
+        fontSize: '11px',
+        fontWeight: 600,
+        lineHeight: '16px',
+        color: '#ffffff',
+        backgroundColor: color,
+        verticalAlign: 'middle',
+      }}
+    >
+      Team
+    </span>
+  );
 
   const threadsMembersOnlyBlock =
     who_can_post_threads === 'members_only' && subjectType === 'VISITOR';
@@ -165,6 +208,13 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     }
     if (!membersCanDelete) {
       return false;
+    }
+    return subjectType === 'MEMBER' && !!userId && ownerUserId === userId;
+  };
+
+  const canEditContent = (ownerUserId: string | null): boolean => {
+    if (subjectType === 'APP') {
+      return true;
     }
     return subjectType === 'MEMBER' && !!userId && ownerUserId === userId;
   };
@@ -210,6 +260,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           is_pinned: thread.is_pinned ?? false,
           likeCount: 0,
           likedByMe: false,
+          edited: !!thread.edited_at,
         }))
       );
     } finally {
@@ -252,6 +303,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         user_id: row.user_id ?? null,
         likeCount: 0,
         likedByMe: false,
+        edited: !!row.edited_at,
       }));
       setReplies(mappedReplies);
 
@@ -302,10 +354,12 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           threads: ThreadRow[];
           subjectType: string | null;
           userId: string | null;
+          staffUserIds?: string[];
         };
         if (cancelled) return;
         setSubjectType(data.subjectType ?? null);
         setUserId(data.userId ?? null);
+        setStaffUserIds(Array.isArray(data.staffUserIds) ? data.staffUserIds : []);
 
         const planRes = await httpClient.fetchWithAuth(
           `${baseApiUrl}/api/forum?action=get_plan`
@@ -327,6 +381,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           is_pinned: thread.is_pinned ?? false,
           likeCount: 0,
           likedByMe: false,
+          edited: !!thread.edited_at,
           }))
         );
 
@@ -383,6 +438,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     setDetailThread(thread);
     setShowReplyForm(false);
     resetReplyForm();
+    setIsEditingThread(false);
+    setEditingReplyId(null);
+    setEditError(null);
+    setEditReplyError(null);
   };
 
   const handleBackToList = () => {
@@ -391,6 +450,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     resetReplyForm();
     setReplies([]);
     setRepliesError(null);
+    setIsEditingThread(false);
+    setEditingReplyId(null);
+    setEditError(null);
+    setEditReplyError(null);
   };
 
   const handleOpenNewThread = () => {
@@ -509,6 +572,91 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       }
     } catch {
       // ignore
+    }
+  };
+
+  const handleStartEditThread = () => {
+    if (!detailThread) return;
+    setEditTitle(detailThread.title);
+    setEditBody(detailThread.body);
+    setEditError(null);
+    setIsEditingThread(true);
+  };
+
+  const handleSaveEditThread = async () => {
+    if (!detailThread) return;
+    if (!editTitle.trim() || !editBody.trim()) {
+      setEditError('Title and body cannot be empty.');
+      return;
+    }
+    setEditError(null);
+    setIsEditSaving(true);
+    try {
+      const response = await httpClient.fetchWithAuth(`${baseApiUrl}/api/forum`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'edit_thread',
+          thread_id: detailThread.id,
+          title: editTitle,
+          content: editBody,
+        }),
+      });
+      if (!response.ok) {
+        setEditError('Could not save changes.');
+        return;
+      }
+      const newTitle = editTitle.trim();
+      const newBody = editBody.trim();
+      const editedId = detailThread.id;
+      setDetailThread((prev) => (prev ? { ...prev, title: newTitle, body: newBody, edited: true } : null));
+      setThreads((prev) =>
+        prev.map((t) => (t.id === editedId ? { ...t, title: newTitle, body: newBody, edited: true } : t)),
+      );
+      setIsEditingThread(false);
+    } catch {
+      setEditError('Could not save changes.');
+    } finally {
+      setIsEditSaving(false);
+    }
+  };
+
+  const handleStartEditReply = (reply: Reply) => {
+    setEditingReplyId(reply.id);
+    setEditReplyBody(reply.body);
+    setEditReplyError(null);
+  };
+
+  const handleSaveEditReply = async () => {
+    if (!editingReplyId) return;
+    if (!editReplyBody.trim()) {
+      setEditReplyError('Reply cannot be empty.');
+      return;
+    }
+    setEditReplyError(null);
+    setIsEditReplySaving(true);
+    try {
+      const response = await httpClient.fetchWithAuth(`${baseApiUrl}/api/forum`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'edit_reply',
+          reply_id: editingReplyId,
+          content: editReplyBody,
+        }),
+      });
+      if (!response.ok) {
+        setEditReplyError('Could not save changes.');
+        return;
+      }
+      const newBody = editReplyBody.trim();
+      const editedId = editingReplyId;
+      setReplies((prev) => prev.map((r) => (r.id === editedId ? { ...r, body: newBody, edited: true } : r)));
+      setEditingReplyId(null);
+    } catch {
+      setEditReplyError('Could not save changes.');
+    } finally {
+      setIsEditReplySaving(false);
     }
   };
 
@@ -858,22 +1006,140 @@ const ForumWidget: FC<ForumWidgetProps> = ({
             Back
           </button>
 
-          <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>{detailThread.title}</h3>
-          <p
-            style={{
-              margin: 0,
-              fontSize: '14px',
-              lineHeight: 1.5,
-              color: '#374151',
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {detailThread.body || '—'}
-          </p>
+          {isEditingThread ? (
+            <div style={{ display: 'grid', gap: '10px' }}>
+              <div>
+                <label style={fieldLabelStyle}>Title</label>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  style={fieldInputStyle}
+                />
+              </div>
+              <div>
+                <label style={fieldLabelStyle}>Body</label>
+                <textarea
+                  value={editBody}
+                  onChange={(e) => setEditBody(e.target.value)}
+                  style={fieldTextareaStyle}
+                />
+              </div>
+              {editError ? (
+                <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{editError}</p>
+              ) : null}
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => void handleSaveEditThread()}
+                  disabled={isEditSaving}
+                  style={{
+                    border: 'none',
+                    borderRadius: '8px',
+                    backgroundColor: color,
+                    opacity: isEditSaving ? 0.6 : 1,
+                    color: '#ffffff',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    padding: '8px 14px',
+                    cursor: isEditSaving ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {isEditSaving ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setIsEditingThread(false); setEditError(null); }}
+                  disabled={isEditSaving}
+                  style={{
+                    border: '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    backgroundColor: '#ffffff',
+                    color: '#374151',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    padding: '8px 14px',
+                    cursor: isEditSaving ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>{detailThread.title}</h3>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: '14px',
+                  lineHeight: 1.5,
+                  color: '#374151',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {detailThread.body || '—'}
+              </p>
+              {canEditContent(detailThread.user_id) ? (
+                <button
+                  type="button"
+                  onClick={handleStartEditThread}
+                  style={{
+                    alignSelf: 'flex-start',
+                    justifySelf: 'start',
+                    border: 'none',
+                    background: 'none',
+                    padding: 0,
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color: color,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ✏️ Edit
+                </button>
+              ) : null}
+            </>
+          )}
           <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>
-            {detailThread.author} • {detailThread.timestamp} • {detailThread.replies}{' '}
+            {detailThread.author}{isStaff(detailThread.user_id) ? staffBadge : null} • {detailThread.timestamp}{detailThread.edited ? ' (edited)' : ''} • {detailThread.replies}{' '}
             {detailThread.replies === 1 ? 'reply' : 'replies'}
           </p>
+          {(() => {
+            const liveThread = threads.find((t) => t.id === detailThread.id);
+            const likeCount = liveThread?.likeCount ?? 0;
+            const likedByMe = liveThread?.likedByMe ?? false;
+            if (subjectType !== 'MEMBER' && likeCount === 0) {
+              return null;
+            }
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '14px',
+                  color: likedByMe ? color : '#9ca3af',
+                  cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
+                  alignSelf: 'flex-start',
+                  transition: 'transform 0.15s ease, color 0.15s ease',
+                }}
+                onClick={() => {
+                  if (subjectType === 'MEMBER') {
+                    void handleToggleLike(detailThread.id);
+                  }
+                }}
+                onMouseDown={(e) => {
+                  if (subjectType === 'MEMBER') e.currentTarget.style.transform = 'scale(1.4)';
+                }}
+                onMouseUp={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                }}
+              >
+                {likedByMe ? '❤️' : '🤍'} {likeCount > 0 ? likeCount : ''}
+              </span>
+            );
+          })()}
 
           <div>
             <p style={{ margin: '0 0 8px', fontSize: '14px', fontWeight: 600, color: '#111827' }}>
@@ -934,30 +1200,93 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                         }}
                       >
                         <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>
-                          {reply.author} • {reply.timestamp}
+                          {reply.author}{isStaff(reply.user_id) ? staffBadge : null} • {reply.timestamp}{reply.edited ? ' (edited)' : ''}
                         </p>
-                        {canDeleteContent(reply.user_id) ? (
-                          <button
-                            type="button"
-                            title="Delete reply"
-                            aria-label="Delete reply"
-                            onClick={() => void handleDeleteReply(reply.id)}
-                            style={deleteButtonStyle}
-                          >
-                            🗑
-                          </button>
-                        ) : null}
+                        <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
+                          {canEditContent(reply.user_id) && editingReplyId !== reply.id ? (
+                            <button
+                              type="button"
+                              title="Edit reply"
+                              aria-label="Edit reply"
+                              onClick={() => handleStartEditReply(reply)}
+                              style={deleteButtonStyle}
+                            >
+                              ✏️
+                            </button>
+                          ) : null}
+                          {canDeleteContent(reply.user_id) ? (
+                            <button
+                              type="button"
+                              title="Delete reply"
+                              aria-label="Delete reply"
+                              onClick={() => void handleDeleteReply(reply.id)}
+                              style={deleteButtonStyle}
+                            >
+                              🗑
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: '14px',
-                          color: '#111827',
-                          whiteSpace: 'pre-wrap',
-                        }}
-                      >
-                        {reply.body}
-                      </p>
+                      {editingReplyId === reply.id ? (
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                          <textarea
+                            value={editReplyBody}
+                            onChange={(e) => setEditReplyBody(e.target.value)}
+                            style={fieldTextareaStyle}
+                          />
+                          {editReplyError ? (
+                            <p style={{ margin: 0, fontSize: '13px', color: '#b91c1c' }}>{editReplyError}</p>
+                          ) : null}
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              type="button"
+                              onClick={() => void handleSaveEditReply()}
+                              disabled={isEditReplySaving}
+                              style={{
+                                border: 'none',
+                                borderRadius: '8px',
+                                backgroundColor: color,
+                                opacity: isEditReplySaving ? 0.6 : 1,
+                                color: '#ffffff',
+                                fontSize: '13px',
+                                fontWeight: 600,
+                                padding: '6px 12px',
+                                cursor: isEditReplySaving ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              {isEditReplySaving ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setEditingReplyId(null); setEditReplyError(null); }}
+                              disabled={isEditReplySaving}
+                              style={{
+                                border: '1px solid #d1d5db',
+                                borderRadius: '8px',
+                                backgroundColor: '#ffffff',
+                                color: '#374151',
+                                fontSize: '13px',
+                                fontWeight: 600,
+                                padding: '6px 12px',
+                                cursor: isEditReplySaving ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: '14px',
+                            color: '#111827',
+                            whiteSpace: 'pre-wrap',
+                          }}
+                        >
+                          {reply.body}
+                        </p>
+                      )}
                       {(subjectType === 'MEMBER' || reply.likeCount > 0) && (
                         <span
                           style={{
@@ -1219,10 +1548,27 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                     <p style={{ margin: '0 0 6px', fontSize: '15px', fontWeight: 600 }}>
                       {thread.is_pinned ? '📌 ' : ''}{thread.title}
                     </p>
+                    {thread.body ? (
+                      <p
+                        style={{
+                          margin: '0 0 6px',
+                          fontSize: '14px',
+                          lineHeight: 1.5,
+                          color: '#374151',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical' as const,
+                          overflow: 'hidden',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {thread.body}
+                      </p>
+                    ) : null}
                     <p style={{ margin: 0, fontSize: '13px', color: '#4b5563' }}>
-                      {thread.author} •{' '}
+                      {thread.author}{isStaff(thread.user_id) ? staffBadge : null} •{' '}
                       {thread.replies === 1 ? '1 reply' : `${thread.replies} replies`} •{' '}
-                      {thread.timestamp}
+                      {thread.timestamp}{thread.edited ? ' (edited)' : ''}
                     </p>
                     {(subjectType === 'MEMBER' || thread.likeCount > 0) && (
                       <span
@@ -1337,7 +1683,7 @@ const customElement = reactToWebComponent(
   React,
   ReactDOM as any,
   {
-    props: ['title', 'new_thread_label', 'color', 'who_can_post_threads', 'who_can_post_replies', 'members_can_delete'],
+    props: ['title', 'new_thread_label', 'color', 'who_can_post_threads', 'who_can_post_replies', 'members_can_delete', 'threads_per_page'],
   }
 );
 customElements.define('forum-widget', customElement);

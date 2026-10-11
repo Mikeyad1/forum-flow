@@ -10,6 +10,8 @@ const DEFAULT_COLOR = '#2563EB';
 const DEFAULT_THREADS_AUDIENCE: PostingAudience = 'everyone';
 const DEFAULT_REPLIES_AUDIENCE: PostingAudience = 'everyone';
 const DEFAULT_MEMBERS_CAN_DELETE = true;
+const DEFAULT_THREADS_PER_PAGE = '10';
+const THREADS_PER_PAGE_OPTIONS = ['5', '10', '15', '20', '30'];
 
 const SETTINGS_CONTAINER_STYLE: React.CSSProperties = {
   fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
@@ -70,6 +72,7 @@ const SettingsPanel: FC = () => {
     DEFAULT_REPLIES_AUDIENCE,
   );
   const [membersCanDelete, setMembersCanDelete] = useState(DEFAULT_MEMBERS_CAN_DELETE);
+  const [threadsPerPage, setThreadsPerPage] = useState(DEFAULT_THREADS_PER_PAGE);
 
   useEffect(() => {
     let isMounted = true;
@@ -82,6 +85,7 @@ const SettingsPanel: FC = () => {
         savedThreadAudience,
         savedReplyAudience,
         savedMembersCanDelete,
+        savedThreadsPerPage,
       ] = await Promise.all([
         client.widget.getProp('title'),
         client.widget.getProp('new_thread_label'),
@@ -89,6 +93,7 @@ const SettingsPanel: FC = () => {
         client.widget.getProp('who_can_post_threads'),
         client.widget.getProp('who_can_post_replies'),
         client.widget.getProp('members_can_delete'),
+        client.widget.getProp('threads_per_page'),
       ]);
 
       if (!isMounted) {
@@ -105,6 +110,8 @@ const SettingsPanel: FC = () => {
       setWhoCanPostThreads(selectAudience(savedThreadAudience, DEFAULT_THREADS_AUDIENCE));
       setWhoCanPostReplies(selectAudience(savedReplyAudience, DEFAULT_REPLIES_AUDIENCE));
       setMembersCanDelete(parseBooleanProp(savedMembersCanDelete, DEFAULT_MEMBERS_CAN_DELETE));
+      const perPageStr = savedThreadsPerPage != null ? String(savedThreadsPerPage) : '';
+      setThreadsPerPage(THREADS_PER_PAGE_OPTIONS.includes(perPageStr) ? perPageStr : DEFAULT_THREADS_PER_PAGE);
     };
 
     void loadProps();
@@ -149,6 +156,12 @@ const SettingsPanel: FC = () => {
     await client.widget.setProp('members_can_delete', String(nextValue));
   };
 
+  const updateThreadsPerPage = async (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextValue = event.target.value;
+    setThreadsPerPage(nextValue);
+    await client.widget.setProp('threads_per_page', nextValue);
+  };
+
   return (
     <section style={SETTINGS_CONTAINER_STYLE}>
       <label style={LABEL_STYLE}>
@@ -179,6 +192,15 @@ const SettingsPanel: FC = () => {
         <select value={whoCanPostReplies} onChange={updateReplyAudience} style={INPUT_STYLE}>
           <option value="everyone">Everyone</option>
           <option value="members_only">Members only</option>
+        </select>
+      </label>
+
+      <label style={LABEL_STYLE}>
+        Threads per page
+        <select value={threadsPerPage} onChange={updateThreadsPerPage} style={INPUT_STYLE}>
+          {THREADS_PER_PAGE_OPTIONS.map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
         </select>
       </label>
 

@@ -31,6 +31,12 @@ type ReplyRow = {
   created_at: string | null;
 };
 
+type AuthorRow = {
+  user_id: string;
+  user_name: string;
+  is_staff: boolean;
+};
+
 const baseApiUrl = new URL(import.meta.env.BASE_API_URL || '', location.href).origin;
 
 const jsonHeaders = { 'Content-Type': 'application/json' };
@@ -76,6 +82,9 @@ const DashboardPage: FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const THREADS_PER_PAGE = 15;
   const [currentPage, setCurrentPage] = useState(1);
+  const [authors, setAuthors] = useState<AuthorRow[]>([]);
+  const [authorsLoading, setAuthorsLoading] = useState(false);
+  const [staffTogglingId, setStaffTogglingId] = useState<string | null>(null);
 
   const loadThreads = useCallback(async () => {
     setIsLoading(true);
@@ -136,6 +145,43 @@ const DashboardPage: FC = () => {
     }
   }, []);
 
+  const loadAuthors = useCallback(async () => {
+    setAuthorsLoading(true);
+    try {
+      const response = await httpClient.fetchWithAuth(
+        `${baseApiUrl}/api/forum?action=admin_list_authors`,
+        { headers: jsonHeaders },
+      );
+      if (!response.ok) {
+        setAuthors([]);
+        return;
+      }
+      const data = (await response.json()) as AuthorRow[];
+      setAuthors(Array.isArray(data) ? data : []);
+    } catch {
+      setAuthors([]);
+    } finally {
+      setAuthorsLoading(false);
+    }
+  }, []);
+
+  const handleToggleStaff = useCallback(async (userId: string, currentlyStaff: boolean) => {
+    setStaffTogglingId(userId);
+    try {
+      const response = await httpClient.fetchWithAuth(
+        `${baseApiUrl}/api/forum?action=admin_set_staff&user_id=${encodeURIComponent(userId)}&staff=${currentlyStaff ? 'false' : 'true'}`,
+        { headers: jsonHeaders },
+      );
+      if (response.ok) {
+        setAuthors((prev) =>
+          prev.map((a) => (a.user_id === userId ? { ...a, is_staff: !currentlyStaff } : a)),
+        );
+      }
+    } finally {
+      setStaffTogglingId(null);
+    }
+  }, []);
+
   useEffect(() => {
     const checkPlan = async () => {
       try {
@@ -146,6 +192,7 @@ const DashboardPage: FC = () => {
         setIsFree(freeStatus);
         if (!freeStatus) {
           void loadThreads();
+          void loadAuthors();
         }
       } catch {
         setIsFree(true);
@@ -154,8 +201,7 @@ const DashboardPage: FC = () => {
       }
     };
     void checkPlan();
-  }, [loadThreads]);
-
+  }, [loadThreads, loadAuthors]);
   const handleDelete = useCallback(async (threadId: string) => {
     setDeletingId(threadId);
 
@@ -342,6 +388,7 @@ const DashboardPage: FC = () => {
               </div>
             </Card>
           ) : (
+            <>
             <Card>
               <Table data={paginatedThreads} columns={columns}>
                 <TableToolbar>
@@ -455,6 +502,53 @@ const DashboardPage: FC = () => {
                 </div>
               )}
             </Card>
+              <div style={{ height: '24px' }} />
+              <Card>
+                <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <Text weight="bold">Team members</Text>
+                  <Text size="small" secondary>
+                    Mark forum members as part of your team. Team members get a "Team" badge next to their name in the forum.
+                  </Text>
+                  {authorsLoading ? (
+                    <div style={{ display: 'flex', justifyContent: 'center', padding: '24px' }}>
+                      <Loader size="small" />
+                    </div>
+                  ) : authors.length === 0 ? (
+                    <Text size="small">No one has posted in the forum yet.</Text>
+                  ) : (
+                    authors.map((author) => (
+                      <div
+                        key={author.user_id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '8px 0',
+                          borderBottom: '1px solid #f0f0f0',
+                        }}
+                      >
+                        <Text>
+                          {author.user_name}
+                          {author.is_staff ? ' · Team' : ''}
+                        </Text>
+                        <Button
+                          size="small"
+                          skin={author.is_staff ? 'standard' : 'light'}
+                          disabled={staffTogglingId === author.user_id}
+                          onClick={() => void handleToggleStaff(author.user_id, author.is_staff)}
+                        >
+                          {staffTogglingId === author.user_id
+                            ? '…'
+                            : author.is_staff
+                              ? 'Remove from team'
+                              : 'Add to team'}
+                        </Button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </Card>
+            </>
           )}
         </Page.Content>
       </Page>

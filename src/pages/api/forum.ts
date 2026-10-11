@@ -41,11 +41,21 @@ export async function POST({ request }: { request: Request }) {
     if (subjectType === "MEMBER" || subjectType === "USER") {
       try {
         const memberData = await elevatedGetMember(userId, { fieldsets: ["FULL"] });
-        userName =
-          memberData?.profile?.nickname ??
-          memberData?.contact?.firstName ??
-          memberData?.loginEmail?.split('@')[0] ??
-          `User-${userId.slice(0, 8)}`;
+        const emailPrefix = memberData?.loginEmail?.split('@')[0]?.toLowerCase() ?? '';
+        const nickname = memberData?.profile?.nickname?.trim() ?? '';
+        const firstName = memberData?.contact?.firstName?.trim() ?? '';
+        const lastName = memberData?.contact?.lastName?.trim() ?? '';
+        const nicknameLooksLikeEmail =
+          !!nickname &&
+          (nickname.includes('@') || (emailPrefix !== '' && nickname.toLowerCase() === emailPrefix));
+
+        if (nickname && !nicknameLooksLikeEmail) {
+          userName = nickname;
+        } else if (firstName) {
+          userName = lastName ? `${firstName} ${lastName.charAt(0)}.` : firstName;
+        } else {
+          userName = 'Member';
+        }
       } catch {
         // keep default
       }
@@ -64,12 +74,14 @@ export async function POST({ request }: { request: Request }) {
       action !== "create_thread" &&
       action !== "create_reply" &&
       action !== "delete_thread" &&
-      action !== "delete_reply"
+      action !== "delete_reply" &&
+      action !== "edit_thread" &&
+      action !== "edit_reply"
     ) {
       return new Response(
         JSON.stringify({
           error:
-            'Unsupported action. Use "create_thread", "create_reply", "delete_thread", or "delete_reply".',
+            'Unsupported action. Use "create_thread", "create_reply", "delete_thread", "delete_reply", "edit_thread", or "edit_reply".',
         }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
@@ -145,6 +157,7 @@ export async function POST({ request }: { request: Request }) {
         user_id: userId,
         user_name: userName,
         author_name: userName,
+        author_type: subjectType,
       };
 
       const supabaseResponse = await fetch(`${supabaseUrl}/rest/v1/threads`, {
@@ -226,6 +239,7 @@ export async function POST({ request }: { request: Request }) {
         user_id: userId,
         user_name: userName,
         author_name: userName,
+        author_type: subjectType,
       };
 
       const supabaseResponse = await fetch(`${supabaseUrl}/rest/v1/replies`, {
@@ -440,6 +454,147 @@ export async function POST({ request }: { request: Request }) {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
+    } else if (action === "edit_thread") {
+      if (!thread_id || !title || !title.trim() || !content || !content.trim()) {
+        return new Response(
+          JSON.stringify({ error: "Missing required fields: thread_id, title, content" }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      const threadUrl = `${supabaseUrl}/rest/v1/threads?id=eq.${encodeURIComponent(String(thread_id))}&site_id=eq.${encodeURIComponent(instanceId)}`;
+
+      const threadResponse = await fetch(`${threadUrl}&select=user_id`, {
+        headers: {
+          apikey: supabaseServiceRoleKey,
+          Authorization: `Bearer ${supabaseServiceRoleKey}`,
+        },
+      });
+
+      if (!threadResponse.ok) {
+        const errorText = await threadResponse.text();
+        return new Response(
+          JSON.stringify({ error: "Failed to load thread", details: errorText }),
+          { status: 502, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      const threadRows = (await threadResponse.json()) as { user_id?: string }[];
+      const thread = Array.isArray(threadRows) && threadRows.length > 0 ? threadRows[0] : null;
+
+      if (!thread) {
+        return new Response(JSON.stringify({ error: "Thread not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const isOwner = subjectType === "APP";
+      const isAuthor = subjectType === "MEMBER" && thread.user_id === userId;
+      if (!isOwner && !isAuthor) {
+        return new Response(JSON.stringify({ error: "Not allowed" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const patchResponse = await fetch(threadUrl, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: supabaseServiceRoleKey,
+          Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({ title: title.trim(), body: content.trim(), edited_at: new Date().toISOString() }),
+      });
+
+      if (!patchResponse.ok) {
+        const errorText = await patchResponse.text();
+        return new Response(
+          JSON.stringify({ error: "Failed to update thread", details: errorText }),
+          { status: 502, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      const updated = (await patchResponse.json()) as unknown;
+      const updatedThread = Array.isArray(updated) && updated.length > 0 ? updated[0] : updated;
+
+      return new Response(JSON.stringify(updatedThread), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    } else if (action === "edit_reply") {
+      if (!reply_id || !content || !content.trim()) {
+        return new Response(
+          JSON.stringify({ error: "Missing required fields: reply_id, content" }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      const replyUrl = `${supabaseUrl}/rest/v1/replies?id=eq.${encodeURIComponent(String(reply_id))}&site_id=eq.${encodeURIComponent(instanceId)}`;
+
+      const replyResponse = await fetch(`${replyUrl}&select=user_id`, {
+        headers: {
+          apikey: supabaseServiceRoleKey,
+          Authorization: `Bearer ${supabaseServiceRoleKey}`,
+        },
+      });
+
+      if (!replyResponse.ok) {
+        const errorText = await replyResponse.text();
+        return new Response(
+          JSON.stringify({ error: "Failed to load reply", details: errorText }),
+          { status: 502, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      const replyRows = (await replyResponse.json()) as { user_id?: string }[];
+      const reply = Array.isArray(replyRows) && replyRows.length > 0 ? replyRows[0] : null;
+
+      if (!reply) {
+        return new Response(JSON.stringify({ error: "Reply not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const isOwner = subjectType === "APP";
+      const isAuthor = subjectType === "MEMBER" && reply.user_id === userId;
+      if (!isOwner && !isAuthor) {
+        return new Response(JSON.stringify({ error: "Not allowed" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const patchResponse = await fetch(replyUrl, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: supabaseServiceRoleKey,
+          Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({ body: content.trim(), edited_at: new Date().toISOString() }),
+      });
+
+      if (!patchResponse.ok) {
+        const errorText = await patchResponse.text();
+        return new Response(
+          JSON.stringify({ error: "Failed to update reply", details: errorText }),
+          { status: 502, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      const updated = (await patchResponse.json()) as unknown;
+      const updatedReply = Array.isArray(updated) && updated.length > 0 ? updated[0] : updated;
+
+      return new Response(JSON.stringify(updatedReply), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
   } catch (error) {
@@ -478,10 +633,17 @@ export async function GET({ request }: { request: Request }) {
       });
     }
 
+    if (action && action.startsWith("admin_") && tokenInfo.subjectType !== "USER") {
+      return new Response(JSON.stringify({ error: "Not allowed" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     if (action === "get_threads_with_identity") {
       const authHeader = request.headers.get("authorization");
 
-      const [identityResult, threadsResponse] = await Promise.all([
+      const [identityResult, threadsResponse, staffResponse] = await Promise.all([
         authHeader
           ? fetch("https://www.wixapis.com/oauth2/token-info", {
               method: "POST",
@@ -500,6 +662,15 @@ export async function GET({ request }: { request: Request }) {
             },
           }
         ),
+        fetch(
+          `${supabaseUrl}/rest/v1/staff?site_id=eq.${encodeURIComponent(instanceId)}&select=user_id`,
+          {
+            headers: {
+              apikey: supabaseServiceRoleKey,
+              Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            },
+          }
+        ),
       ]);
 
       if (!threadsResponse.ok) {
@@ -511,12 +682,18 @@ export async function GET({ request }: { request: Request }) {
       }
 
       const threads = await threadsResponse.json();
+      let staffUserIds: string[] = [];
+      if (staffResponse.ok) {
+        const staffRows = (await staffResponse.json()) as { user_id: string }[];
+        staffUserIds = Array.isArray(staffRows) ? staffRows.map((r) => r.user_id) : [];
+      }
 
       return new Response(
         JSON.stringify({
           threads,
           subjectType: identityResult?.subjectType ?? null,
           userId: identityResult?.subjectId ?? null,
+          staffUserIds,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
@@ -762,6 +939,93 @@ export async function GET({ request }: { request: Request }) {
       }
 
       return new Response(JSON.stringify({ success: true, is_pinned: isPinned }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    } else if (action === "admin_list_authors") {
+      const sbHeaders = {
+        apikey: supabaseServiceRoleKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+      };
+      const siteFilter = `site_id=eq.${encodeURIComponent(instanceId)}`;
+      const [threadsRes, repliesRes, staffRes] = await Promise.all([
+        fetch(`${supabaseUrl}/rest/v1/threads?${siteFilter}&select=user_id,user_name,author_name,created_at,author_type`, { headers: sbHeaders }),
+        fetch(`${supabaseUrl}/rest/v1/replies?${siteFilter}&select=user_id,user_name,author_name,created_at,author_type`, { headers: sbHeaders }),
+        fetch(`${supabaseUrl}/rest/v1/staff?${siteFilter}&select=user_id`, { headers: sbHeaders }),
+      ]);
+      if (!threadsRes.ok || !repliesRes.ok || !staffRes.ok) {
+        return new Response(JSON.stringify({ error: "Failed to load authors" }), {
+          status: 502,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      type AuthorRow = { user_id: string | null; user_name: string | null; author_name: string | null; created_at: string | null; author_type: string | null };
+      const rows = [
+        ...((await threadsRes.json()) as AuthorRow[]),
+        ...((await repliesRes.json()) as AuthorRow[]),
+      ];
+      const staffRows = (await staffRes.json()) as { user_id: string }[];
+      const staffSet = new Set(staffRows.map((r) => r.user_id));
+      const latest = new Map<string, { user_name: string; created_at: string }>();
+      for (const row of rows) {
+        if (!row.user_id || row.user_id === "system") continue;
+        if (row.author_type === "VISITOR") continue;
+        const name = row.user_name ?? row.author_name ?? "Unknown";
+        const createdAt = row.created_at ?? "";
+        const existing = latest.get(row.user_id);
+        if (!existing || createdAt > existing.created_at) {
+          latest.set(row.user_id, { user_name: name, created_at: createdAt });
+        }
+      }
+      const authors = Array.from(latest.entries())
+        .map(([user_id, v]) => ({ user_id, user_name: v.user_name, is_staff: staffSet.has(user_id) }))
+        .sort((a, b) => a.user_name.localeCompare(b.user_name));
+      return new Response(JSON.stringify(authors), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    } else if (action === "admin_set_staff") {
+      const targetUserId = url.searchParams.get("user_id");
+      const staffValue = url.searchParams.get("staff");
+      if (!targetUserId || (staffValue !== "true" && staffValue !== "false")) {
+        return new Response(JSON.stringify({ error: "Missing user_id or staff" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      let staffRes: Response;
+      if (staffValue === "true") {
+        staffRes = await fetch(`${supabaseUrl}/rest/v1/staff?on_conflict=site_id,user_id`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            Prefer: "resolution=ignore-duplicates,return=minimal",
+          },
+          body: JSON.stringify({ site_id: instanceId, user_id: targetUserId }),
+        });
+      } else {
+        staffRes = await fetch(
+          `${supabaseUrl}/rest/v1/staff?site_id=eq.${encodeURIComponent(instanceId)}&user_id=eq.${encodeURIComponent(targetUserId)}`,
+          {
+            method: "DELETE",
+            headers: {
+              apikey: supabaseServiceRoleKey,
+              Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            },
+          }
+        );
+      }
+      if (!staffRes.ok) {
+        return new Response(JSON.stringify({ error: "Failed to update staff" }), {
+          status: 502,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ success: true, is_staff: staffValue === "true" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
