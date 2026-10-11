@@ -585,8 +585,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
 
   const handleSaveEditThread = async () => {
     if (!detailThread) return;
-    if (!editTitle.trim() || !editBody.trim()) {
-      setEditError('Title and body cannot be empty.');
+    if (!editTitle.trim()) {
+      setEditError('Title cannot be empty.');
       return;
     }
     setEditError(null);
@@ -1069,17 +1069,19 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           ) : (
             <>
               <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>{detailThread.title}</h3>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: '14px',
-                  lineHeight: 1.5,
-                  color: '#374151',
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                {detailThread.body || '—'}
-              </p>
+              {detailThread.body ? (
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: '14px',
+                    lineHeight: 1.5,
+                    color: '#374151',
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {detailThread.body}
+                </p>
+              ) : null}
               {canEditContent(detailThread.user_id) ? (
                 <button
                   type="button"

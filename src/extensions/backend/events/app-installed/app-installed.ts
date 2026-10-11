@@ -12,9 +12,8 @@ const DEMO_THREADS = [
   },
 ];
 
-export default appInstances.onAppInstanceInstalled((event) => {
+export default appInstances.onAppInstanceInstalled(async (event) => {
   const instanceId = event.metadata.instanceId;
-  void (async () => {
 
   const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL as string | undefined;
   const supabaseKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY as string | undefined;
@@ -55,8 +54,6 @@ export default appInstances.onAppInstanceInstalled((event) => {
       console.error('[ForumFlow] app-installed: demo thread exception', err);
     }
   }
-
-  await new Promise((resolve) => setTimeout(resolve, 3000));
 
   if (!resendApiKey) {
     console.error('[ForumFlow] app-installed: missing RESEND_API_KEY');
@@ -101,5 +98,4 @@ export default appInstances.onAppInstanceInstalled((event) => {
   } catch (err) {
     console.error('[ForumFlow] app-installed: email exception', err);
   }
-  })();
 });

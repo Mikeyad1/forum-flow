@@ -142,16 +142,16 @@ export async function POST({ request }: { request: Request }) {
         // If plan check fails, allow the action
       }
 
-      if (!title || !content) {
+      if (!title || !title.trim()) {
         return new Response(
-          JSON.stringify({ error: "Missing required fields: title, content" }),
+          JSON.stringify({ error: "Missing required field: title" }),
           { status: 400, headers: { "Content-Type": "application/json" } }
         );
       }
 
       const insertPayload = {
         title,
-        body: content,
+        body: content ?? "",
         category_id: category_id ?? null,
         site_id: instanceId,
         user_id: userId,
@@ -455,9 +455,9 @@ export async function POST({ request }: { request: Request }) {
         headers: { "Content-Type": "application/json" },
       });
     } else if (action === "edit_thread") {
-      if (!thread_id || !title || !title.trim() || !content || !content.trim()) {
+      if (!thread_id || !title || !title.trim()) {
         return new Response(
-          JSON.stringify({ error: "Missing required fields: thread_id, title, content" }),
+          JSON.stringify({ error: "Missing required fields: thread_id, title" }),
           { status: 400, headers: { "Content-Type": "application/json" } }
         );
       }
@@ -506,7 +506,7 @@ export async function POST({ request }: { request: Request }) {
           Authorization: `Bearer ${supabaseServiceRoleKey}`,
           Prefer: "return=representation",
         },
-        body: JSON.stringify({ title: title.trim(), body: content.trim(), edited_at: new Date().toISOString() }),
+        body: JSON.stringify({ title: title.trim(), body: (content ?? "").trim(), edited_at: new Date().toISOString() }),
       });
 
       if (!patchResponse.ok) {
