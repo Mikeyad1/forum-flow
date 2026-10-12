@@ -226,6 +226,35 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     return subjectType === 'MEMBER' && !!userId && ownerUserId === userId;
   };
 
+  const fetchLikesBulk = async (
+    action: 'get_likes_bulk' | 'get_reply_likes_bulk',
+    ids: string[],
+  ): Promise<Record<string, { likeCount: number; likedByMe: boolean }>> => {
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += 100) {
+      chunks.push(ids.slice(i, i + 100));
+    }
+    const parts = await Promise.all(
+      chunks.map((chunk) =>
+        httpClient
+          .fetchWithAuth(
+            `${baseApiUrl}/api/forum?action=${action}&ids=${encodeURIComponent(chunk.join(','))}`
+          )
+          .then((r) =>
+            r.ok
+              ? (r.json() as Promise<Record<string, { likeCount: number; likedByMe: boolean }>>)
+              : {}
+          )
+          .catch(() => ({}))
+      )
+    );
+    const merged: Record<string, { likeCount: number; likedByMe: boolean }> = {};
+    for (const part of parts) {
+      Object.assign(merged, part);
+    }
+    return merged;
+  };
+
   const loadThreads = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage(null);
@@ -315,21 +344,16 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       setReplies(mappedReplies);
       setRepliesLoading(false);
 
-      const replyLikesResults = await Promise.all(
-        mappedReplies.map((r) =>
-          httpClient.fetchWithAuth(
-            `${baseApiUrl}/api/forum?action=get_reply_likes&reply_id=${encodeURIComponent(r.id)}`
-          )
-          .then((res) => res.ok ? res.json() as Promise<{ likeCount: number; likedByMe: boolean }> : { likeCount: 0, likedByMe: false })
-          .catch(() => ({ likeCount: 0, likedByMe: false }))
-        )
+      const replyLikes = await fetchLikesBulk(
+        'get_reply_likes_bulk',
+        mappedReplies.map((r) => r.id),
       );
       setReplies((prev) =>
-        prev.map((r, i) => ({
-          ...r,
-          likeCount: replyLikesResults[i]?.likeCount ?? 0,
-          likedByMe: replyLikesResults[i]?.likedByMe ?? false,
-        }))
+        prev.map((r) =>
+          replyLikes[r.id]
+            ? { ...r, likeCount: replyLikes[r.id].likeCount, likedByMe: replyLikes[r.id].likedByMe }
+            : r
+        )
       );
     } finally {
       setRepliesLoading(false);
@@ -344,7 +368,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         setIsEditorMode(true);
         setIsLoading(false);
       }
-    }, 2000);
+    }, 3000);
     const loadAll = async () => {
       const viewMode = await siteWindow.viewMode();
       viewModeResolved = true;
@@ -417,21 +441,16 @@ const ForumWidget: FC<ForumWidgetProps> = ({
 
         const threadIds = data.threads.map((t: ThreadRow) => t.id);
         if (threadIds.length > 0) {
-          const likesResults = await Promise.all(
-            threadIds.map((id: string) =>
-              httpClient.fetchWithAuth(
-                `${baseApiUrl}/api/forum?action=get_likes&thread_id=${encodeURIComponent(id)}`
-              ).then((r) => r.ok ? r.json() as Promise<{ likeCount: number; likedByMe: boolean }> : { likeCount: 0, likedByMe: false })
-              .catch(() => ({ likeCount: 0, likedByMe: false }))
-            )
-          );
-          setThreads((prev) =>
-            prev.map((t, i) => ({
-              ...t,
-              likeCount: likesResults[i]?.likeCount ?? 0,
-              likedByMe: likesResults[i]?.likedByMe ?? false,
-            }))
-          );
+          const threadLikes = await fetchLikesBulk('get_likes_bulk', threadIds);
+          if (!cancelled) {
+            setThreads((prev) =>
+              prev.map((t) =>
+                threadLikes[t.id]
+                  ? { ...t, likeCount: threadLikes[t.id].likeCount, likedByMe: threadLikes[t.id].likedByMe }
+                  : t
+              )
+            );
+          }
         }
       } catch {
         if (!cancelled) setErrorMessage('Could not load forum.');

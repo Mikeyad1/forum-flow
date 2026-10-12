@@ -1560,6 +1560,65 @@ export async function GET({ request }: { request: Request }) {
         headers: { "Content-Type": "application/json" },
       });
 
+    } else if (action === "get_likes_bulk" || action === "get_reply_likes_bulk") {
+      const isReplies = action === "get_reply_likes_bulk";
+      const table = isReplies ? "reply_likes" : "thread_likes";
+      const idColumn = isReplies ? "reply_id" : "thread_id";
+
+      const ids = (url.searchParams.get("ids") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => /^[A-Za-z0-9-]{1,64}$/.test(s))
+        .slice(0, 100);
+
+      if (ids.length === 0) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const currentUserId =
+        tokenInfo.subjectType === "MEMBER" ? (tokenInfo.subjectId ?? null) : null;
+
+      const bulkRes = await fetch(
+        `${supabaseUrl}/rest/v1/${table}?site_id=eq.${encodeURIComponent(instanceId)}&${idColumn}=in.(${ids.map((id) => encodeURIComponent(id)).join(",")})&select=${idColumn},user_id`,
+        {
+          headers: {
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          },
+        }
+      );
+
+      if (!bulkRes.ok) {
+        return new Response(JSON.stringify({ error: "Failed to load likes" }), {
+          status: 502,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const bulkRows = (await bulkRes.json()) as Record<string, string>[];
+      const result: Record<string, { likeCount: number; likedByMe: boolean }> = {};
+      for (const id of ids) {
+        result[id] = { likeCount: 0, likedByMe: false };
+      }
+      if (Array.isArray(bulkRows)) {
+        for (const row of bulkRows) {
+          const entry = result[row[idColumn]];
+          if (!entry) continue;
+          entry.likeCount += 1;
+          if (currentUserId && row.user_id === currentUserId) {
+            entry.likedByMe = true;
+          }
+        }
+      }
+
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
     } else if (action === "get_plan") {
       try {
         const elevatedGetAppInstance = auth.elevate(appInstances.getAppInstance);
