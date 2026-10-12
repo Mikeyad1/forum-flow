@@ -311,6 +311,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         edited: !!row.edited_at,
       }));
       setReplies(mappedReplies);
+      setRepliesLoading(false);
 
       const replyLikesResults = await Promise.all(
         mappedReplies.map((r) =>
@@ -357,6 +358,13 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       setIsLoading(true);
       setErrorMessage(null);
       try {
+        httpClient
+          .fetchWithAuth(`${baseApiUrl}/api/forum?action=get_plan`)
+          .then((r) => (r.ok ? (r.json() as Promise<{ isFree?: boolean }>) : null))
+          .then((planData) => {
+            if (!cancelled && planData) setIsFree(planData.isFree ?? true);
+          })
+          .catch(() => {});
         const response = await httpClient.fetchWithAuth(
           `${baseApiUrl}/api/forum?action=get_threads_with_identity`
         );
@@ -388,14 +396,6 @@ const ForumWidget: FC<ForumWidgetProps> = ({
             .catch(() => {});
         }
 
-        const planRes = await httpClient.fetchWithAuth(
-          `${baseApiUrl}/api/forum?action=get_plan`
-        );
-        if (planRes.ok) {
-          const planData = (await planRes.json()) as { isFree: boolean };
-          if (!cancelled) setIsFree(planData.isFree ?? true);
-        }
-
         setThreads(
           data.threads.map((thread: ThreadRow) => ({
             id: thread.id,
@@ -411,6 +411,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           edited: !!thread.edited_at,
           }))
         );
+        setIsLoading(false);
 
         const threadIds = data.threads.map((t: ThreadRow) => t.id);
         if (threadIds.length > 0) {
