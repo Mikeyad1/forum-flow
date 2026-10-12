@@ -17,6 +17,7 @@ type Thread = {
   likeCount: number;
   likedByMe: boolean;
   edited: boolean;
+  pending?: boolean;
 };
 
 type ThreadRow = {
@@ -41,6 +42,7 @@ type Reply = {
   likeCount: number;
   likedByMe: boolean;
   edited: boolean;
+  pending?: boolean;
 };
 
 type ReplyRow = {
@@ -463,6 +465,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   };
 
   const handleOpenThreadDetail = (thread: Thread) => {
+    if (thread.pending) return;
     setDetailThread(thread);
     setShowReplyForm(false);
     resetReplyForm();
@@ -495,8 +498,49 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   };
 
   const handleSubmitNewThread = async () => {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setFormError("Title can't be empty.");
+      return;
+    }
     setFormError(null);
+
+    const submittedTitle = title;
+    const submittedBody = body;
+    const tempId = `temp-${Date.now()}`;
+    const tempThread: Thread = {
+      id: tempId,
+      title: trimmedTitle,
+      author: subjectType === 'VISITOR' ? (visitorName.trim() || 'Guest') : 'You',
+      replies: 0,
+      timestamp: 'Sending…',
+      body: submittedBody.trim(),
+      user_id: userId,
+      is_pinned: false,
+      likeCount: 0,
+      likedByMe: false,
+      edited: false,
+      pending: true,
+    };
+
+    setThreads((prev) => {
+      const pinned = prev.filter((t) => t.is_pinned);
+      const rest = prev.filter((t) => !t.is_pinned);
+      return [...pinned, tempThread, ...rest];
+    });
+    setSearchQuery('');
+    setCurrentPage(1);
+    setShowNewThreadForm(false);
+    resetFormFields();
     setIsSubmitting(true);
+
+    const restoreForm = (message: string) => {
+      setThreads((prev) => prev.filter((t) => t.id !== tempId));
+      setTitle(submittedTitle);
+      setBody(submittedBody);
+      setFormError(message);
+      setShowNewThreadForm(true);
+    };
 
     try {
       const response = await httpClient.fetchWithAuth(`${baseApiUrl}/api/forum`, {
@@ -504,8 +548,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'create_thread',
-          title,
-          content: body,
+          title: submittedTitle,
+          content: submittedBody,
           category_id: null,
           visitor_name: visitorName,
           who_can_post_threads,
@@ -515,23 +559,45 @@ const ForumWidget: FC<ForumWidgetProps> = ({
 
       if (!response.ok) {
         if (response.status === 403) {
-          const errData = (await response.json()) as { error?: string; type?: string };
+          const errData = (await response.json().catch(() => ({}))) as { error?: string };
           if (errData.error === 'LIMIT_REACHED') {
-            setFormError(subjectType === 'APP' ? 'You have reached the 25-thread limit on the free plan. Upgrade to Pro for unlimited threads.' : 'Something went wrong. Please try again later.');
+            restoreForm(
+              subjectType === 'APP'
+                ? 'You have reached the 25-thread limit on the free plan. Upgrade to Pro for unlimited threads.'
+                : 'Something went wrong. Please try again later.',
+            );
             return;
           }
         }
-        setFormError(
-          response.status === 401
-            ? 'You need to log in to create a thread.'
-            : 'Could not create thread.',
+        restoreForm(
+          response.status === 401 ? 'You need to log in to create a thread.' : 'Could not create thread.',
         );
         return;
       }
 
-      setShowNewThreadForm(false);
-      resetFormFields();
-      await loadThreads();
+      const created = (await response.json()) as ThreadRow;
+      setThreads((prev) =>
+        prev.map((t) =>
+          t.id === tempId
+            ? {
+                id: created.id,
+                title: created.title ?? trimmedTitle,
+                author: created.user_name ?? created.author_name ?? tempThread.author,
+                replies: created.reply_count ?? 0,
+                timestamp: formatTimestamp(created.created_at),
+                body: created.body ?? '',
+                user_id: created.user_id ?? null,
+                is_pinned: created.is_pinned ?? false,
+                likeCount: 0,
+                likedByMe: false,
+                edited: false,
+                pending: false,
+              }
+            : t,
+        ),
+      );
+    } catch {
+      restoreForm('Could not create thread.');
     } finally {
       setIsSubmitting(false);
     }
@@ -812,8 +878,49 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       return;
     }
 
+    const trimmedReply = replyBody.trim();
+    if (!trimmedReply) {
+      setReplyFormError("Reply can't be empty.");
+      return;
+    }
     setReplyFormError(null);
+
+    const threadId = detailThread.id;
+    const submittedBody = replyBody;
+    const tempId = `temp-${Date.now()}`;
+    const tempReply: Reply = {
+      id: tempId,
+      author: subjectType === 'VISITOR' ? (visitorName.trim() || 'Guest') : 'You',
+      body: trimmedReply,
+      timestamp: 'Sending…',
+      user_id: userId,
+      likeCount: 0,
+      likedByMe: false,
+      edited: false,
+      pending: true,
+    };
+
+    setReplies((prev) => [...prev, tempReply]);
+    setDetailThread((prev) => (prev ? { ...prev, replies: prev.replies + 1 } : null));
+    setThreads((prev) =>
+      prev.map((t) => (t.id === threadId ? { ...t, replies: t.replies + 1 } : t)),
+    );
+    setShowReplyForm(false);
+    resetReplyForm();
     setIsReplySubmitting(true);
+
+    const rollback = (message: string) => {
+      setReplies((prev) => prev.filter((r) => r.id !== tempId));
+      setDetailThread((prev) =>
+        prev && prev.id === threadId ? { ...prev, replies: Math.max(0, prev.replies - 1) } : prev,
+      );
+      setThreads((prev) =>
+        prev.map((t) => (t.id === threadId ? { ...t, replies: Math.max(0, t.replies - 1) } : t)),
+      );
+      setReplyBody(submittedBody);
+      setReplyFormError(message);
+      setShowReplyForm(true);
+    };
 
     try {
       const response = await httpClient.fetchWithAuth(`${baseApiUrl}/api/forum`, {
@@ -821,8 +928,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'create_reply',
-          thread_id: detailThread.id,
-          content: replyBody,
+          thread_id: threadId,
+          content: submittedBody,
           visitor_name: visitorName,
           who_can_post_threads,
           who_can_post_replies,
@@ -833,32 +940,40 @@ const ForumWidget: FC<ForumWidgetProps> = ({
 
       if (!response.ok) {
         if (response.status === 403) {
-          const errData = (await response.json()) as { error?: string; type?: string };
+          const errData = (await response.json().catch(() => ({}))) as { error?: string };
           if (errData.error === 'LIMIT_REACHED') {
-            setReplyFormError(subjectType === 'APP' ? 'You have reached the 50-reply limit on the free plan. Upgrade to Pro for unlimited replies.' : 'Something went wrong. Please try again later.');
+            rollback(
+              subjectType === 'APP'
+                ? 'You have reached the 50-reply limit on the free plan. Upgrade to Pro for unlimited replies.'
+                : 'Something went wrong. Please try again later.',
+            );
             return;
           }
         }
-        setReplyFormError(
-          response.status === 401
-            ? 'You need to log in to post a reply.'
-            : 'Could not post reply.',
-        );
+        rollback(response.status === 401 ? 'You need to log in to post a reply.' : 'Could not post reply.');
         return;
       }
 
-      setShowReplyForm(false);
-      resetReplyForm();
-      await loadReplies(detailThread.id);
-
-      setDetailThread((prev) =>
-        prev ? { ...prev, replies: prev.replies + 1 } : null,
-      );
-      setThreads((prev) =>
-        prev.map((t) =>
-          t.id === detailThread.id ? { ...t, replies: t.replies + 1 } : t,
+      const created = (await response.json()) as ReplyRow;
+      setReplies((prev) =>
+        prev.map((r) =>
+          r.id === tempId
+            ? {
+                id: created.id,
+                author: created.user_name ?? created.author_name ?? tempReply.author,
+                body: created.body ?? trimmedReply,
+                timestamp: formatTimestamp(created.created_at),
+                user_id: created.user_id ?? null,
+                likeCount: 0,
+                likedByMe: false,
+                edited: false,
+                pending: false,
+              }
+            : r,
         ),
       );
+    } catch {
+      rollback('Could not post reply.');
     } finally {
       setIsReplySubmitting(false);
     }
