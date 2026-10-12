@@ -165,6 +165,38 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [notifyEnabled, setNotifyEnabled] = useState<boolean | null>(null);
   const [notifySaving, setNotifySaving] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const confirmWrapStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    flexShrink: 0,
+    fontSize: '13px',
+    color: '#6b7280',
+  };
+
+  const confirmYesStyle: React.CSSProperties = {
+    border: 'none',
+    borderRadius: '6px',
+    backgroundColor: '#dc2626',
+    color: '#ffffff',
+    fontSize: '12px',
+    fontWeight: 600,
+    padding: '3px 8px',
+    cursor: 'pointer',
+  };
+
+  const confirmNoStyle: React.CSSProperties = {
+    border: '1px solid #d1d5db',
+    borderRadius: '6px',
+    backgroundColor: '#ffffff',
+    color: '#374151',
+    fontSize: '12px',
+    fontWeight: 600,
+    padding: '3px 8px',
+    cursor: 'pointer',
+  };
   const parsedPerPage = Number(threads_per_page);
   const THREADS_PER_PAGE =
     Number.isFinite(parsedPerPage) && parsedPerPage >= 1 && parsedPerPage <= 50
@@ -531,7 +563,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       title: trimmedTitle,
       author: subjectType === 'VISITOR' ? (visitorName.trim() || 'Guest') : 'You',
       replies: 0,
-      timestamp: 'Sending…',
+      timestamp: 'Just now',
       body: submittedBody.trim(),
       user_id: userId,
       is_pinned: false,
@@ -634,56 +666,75 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const handleDeleteThread = async (threadId: string, e: React.MouseEvent) => {
     e.stopPropagation();
 
+    const removedIndex = threads.findIndex((t) => t.id === threadId);
+    if (removedIndex < 0) return;
+    const removed = threads[removedIndex];
+
+    setThreads((prev) => prev.filter((t) => t.id !== threadId));
+    if (detailThread?.id === threadId) {
+      setDetailThread(null);
+      setReplies([]);
+    }
+
+    const restore = () => {
+      setThreads((prev) => {
+        if (prev.some((t) => t.id === threadId)) return prev;
+        const next = [...prev];
+        next.splice(Math.min(removedIndex, next.length), 0, removed);
+        return next;
+      });
+    };
+
     try {
       const response = await httpClient.fetchWithAuth(`${baseApiUrl}/api/forum`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'delete_thread', thread_id: threadId }),
       });
-
-      if (!response.ok) {
-        return;
-      }
-
-      setThreads((prev) => prev.filter((t) => t.id !== threadId));
-      if (detailThread?.id === threadId) {
-        setDetailThread(null);
-        setReplies([]);
-      }
+      if (!response.ok) restore();
     } catch {
-      // ignore
+      restore();
     }
   };
 
   const handleDeleteReply = async (replyId: string) => {
+    const removedIndex = replies.findIndex((r) => r.id === replyId);
+    if (removedIndex < 0) return;
+    const removed = replies[removedIndex];
+    const threadId = detailThread?.id ?? null;
+
+    const adjustCount = (delta: number) => {
+      if (!threadId) return;
+      setDetailThread((prev) =>
+        prev && prev.id === threadId ? { ...prev, replies: Math.max(0, prev.replies + delta) } : prev,
+      );
+      setThreads((prev) =>
+        prev.map((t) => (t.id === threadId ? { ...t, replies: Math.max(0, t.replies + delta) } : t)),
+      );
+    };
+
+    const restore = () => {
+      setReplies((prev) => {
+        if (prev.some((r) => r.id === replyId)) return prev;
+        const next = [...prev];
+        next.splice(Math.min(removedIndex, next.length), 0, removed);
+        return next;
+      });
+      adjustCount(1);
+    };
+
+    setReplies((prev) => prev.filter((r) => r.id !== replyId));
+    adjustCount(-1);
+
     try {
       const response = await httpClient.fetchWithAuth(`${baseApiUrl}/api/forum`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'delete_reply', reply_id: replyId }),
       });
-
-      if (!response.ok) {
-        return;
-      }
-
-      setReplies((prev) => prev.filter((r) => r.id !== replyId));
-      if (detailThread) {
-        setDetailThread((prev) =>
-          prev
-            ? { ...prev, replies: Math.max(0, (prev.replies ?? 1) - 1) }
-            : null,
-        );
-        setThreads((prev) =>
-          prev.map((t) =>
-            t.id === detailThread.id
-              ? { ...t, replies: Math.max(0, (t.replies ?? 1) - 1) }
-              : t,
-          ),
-        );
-      }
+      if (!response.ok) restore();
     } catch {
-      // ignore
+      restore();
     }
   };
 
@@ -910,7 +961,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       id: tempId,
       author: subjectType === 'VISITOR' ? (visitorName.trim() || 'Guest') : 'You',
       body: trimmedReply,
-      timestamp: 'Sending…',
+      timestamp: 'Just now',
       user_id: userId,
       likeCount: 0,
       likedByMe: false,
@@ -1399,15 +1450,38 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                             </button>
                           ) : null}
                           {canDeleteContent(reply.user_id) ? (
-                            <button
-                              type="button"
-                              title="Delete reply"
-                              aria-label="Delete reply"
-                              onClick={() => void handleDeleteReply(reply.id)}
-                              style={deleteButtonStyle}
-                            >
-                              🗑
-                            </button>
+                            confirmDeleteId === reply.id ? (
+                              <span style={confirmWrapStyle}>
+                                Delete?
+                                <button
+                                  type="button"
+                                  style={confirmYesStyle}
+                                  onClick={() => {
+                                    setConfirmDeleteId(null);
+                                    void handleDeleteReply(reply.id);
+                                  }}
+                                >
+                                  Yes
+                                </button>
+                                <button
+                                  type="button"
+                                  style={confirmNoStyle}
+                                  onClick={() => setConfirmDeleteId(null)}
+                                >
+                                  No
+                                </button>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                title="Delete reply"
+                                aria-label="Delete reply"
+                                onClick={() => setConfirmDeleteId(reply.id)}
+                                style={deleteButtonStyle}
+                              >
+                                🗑
+                              </button>
+                            )
                           ) : null}
                         </div>
                       </div>
@@ -1803,15 +1877,49 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                     )}
                   </div>
                   {canDeleteContent(thread.user_id) ? (
-                    <button
-                      type="button"
-                      title="Delete thread"
-                      aria-label="Delete thread"
-                      onClick={(e) => void handleDeleteThread(thread.id, e)}
-                      style={deleteButtonStyle}
-                    >
-                      🗑
-                    </button>
+                    confirmDeleteId === thread.id ? (
+                      <span
+                        style={confirmWrapStyle}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        Delete?
+                        <button
+                          type="button"
+                          style={confirmYesStyle}
+                          onClick={(e) => {
+                            setConfirmDeleteId(null);
+                            void handleDeleteThread(thread.id, e);
+                          }}
+                        >
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          style={confirmNoStyle}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDeleteId(null);
+                          }}
+                        >
+                          No
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        title="Delete thread"
+                        aria-label="Delete thread"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDeleteId(thread.id);
+                        }}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        style={deleteButtonStyle}
+                      >
+                        🗑
+                      </button>
+                    )
                   ) : null}
                 </div>
               </li>
