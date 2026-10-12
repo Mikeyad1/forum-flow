@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, type FC } from 'react';
+import React, { useCallback, useEffect, useRef, useState, type FC } from 'react';
 import ReactDOM from 'react-dom';
 import reactToWebComponent from 'react-to-webcomponent';
 import { httpClient } from '@wix/essentials';
@@ -166,6 +166,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const [notifyEnabled, setNotifyEnabled] = useState<boolean | null>(null);
   const [notifySaving, setNotifySaving] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const expandedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    expandedIdRef.current = detailThread?.id ?? null;
+  }, [detailThread?.id]);
 
   const confirmWrapStyle: React.CSSProperties = {
     display: 'inline-flex',
@@ -538,6 +542,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   };
 
   const handleOpenNewThread = () => {
+    handleBackToList();
     setFormError(null);
     setShowNewThreadForm(true);
   };
@@ -753,32 +758,54 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       return;
     }
     setEditError(null);
+
+    const editedId = detailThread.id;
+    const submittedTitle = editTitle;
+    const submittedBody = editBody;
+    const newTitle = submittedTitle.trim();
+    const newBody = submittedBody.trim();
+    const prevTitle = detailThread.title;
+    const prevBody = detailThread.body;
+    const prevEdited = detailThread.edited;
+
+    setDetailThread((prev) =>
+      prev && prev.id === editedId ? { ...prev, title: newTitle, body: newBody, edited: true } : prev,
+    );
+    setThreads((prev) =>
+      prev.map((t) => (t.id === editedId ? { ...t, title: newTitle, body: newBody, edited: true } : t)),
+    );
+    setIsEditingThread(false);
     setIsEditSaving(true);
+
+    const revert = () => {
+      setDetailThread((prev) =>
+        prev && prev.id === editedId ? { ...prev, title: prevTitle, body: prevBody, edited: prevEdited } : prev,
+      );
+      setThreads((prev) =>
+        prev.map((t) => (t.id === editedId ? { ...t, title: prevTitle, body: prevBody, edited: prevEdited } : t)),
+      );
+      if (expandedIdRef.current === editedId) {
+        setEditTitle(submittedTitle);
+        setEditBody(submittedBody);
+        setEditError('Could not save changes.');
+        setIsEditingThread(true);
+      }
+    };
+
     try {
       const response = await httpClient.fetchWithAuth(`${baseApiUrl}/api/forum`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'edit_thread',
-          thread_id: detailThread.id,
-          title: editTitle,
-          content: editBody,
+          thread_id: editedId,
+          title: submittedTitle,
+          content: submittedBody,
         }),
       });
-      if (!response.ok) {
-        setEditError('Could not save changes.');
-        return;
-      }
-      const newTitle = editTitle.trim();
-      const newBody = editBody.trim();
-      const editedId = detailThread.id;
-      setDetailThread((prev) => (prev ? { ...prev, title: newTitle, body: newBody, edited: true } : null));
-      setThreads((prev) =>
-        prev.map((t) => (t.id === editedId ? { ...t, title: newTitle, body: newBody, edited: true } : t)),
-      );
-      setIsEditingThread(false);
+      if (!response.ok) revert();
     } catch {
-      setEditError('Could not save changes.');
+      revert();
     } finally {
       setIsEditSaving(false);
     }
@@ -797,27 +824,40 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       return;
     }
     setEditReplyError(null);
+
+    const editedId = editingReplyId;
+    const submittedBody = editReplyBody;
+    const newBody = submittedBody.trim();
+    const original = replies.find((r) => r.id === editedId);
+    const prevBody = original?.body ?? '';
+    const prevEdited = original?.edited ?? false;
+
+    setReplies((prev) => prev.map((r) => (r.id === editedId ? { ...r, body: newBody, edited: true } : r)));
+    setEditingReplyId(null);
     setIsEditReplySaving(true);
+
+    const revert = () => {
+      setReplies((prev) =>
+        prev.map((r) => (r.id === editedId ? { ...r, body: prevBody, edited: prevEdited } : r)),
+      );
+      setEditReplyBody(submittedBody);
+      setEditReplyError('Could not save changes.');
+      setEditingReplyId(editedId);
+    };
+
     try {
       const response = await httpClient.fetchWithAuth(`${baseApiUrl}/api/forum`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'edit_reply',
-          reply_id: editingReplyId,
-          content: editReplyBody,
+          reply_id: editedId,
+          content: submittedBody,
         }),
       });
-      if (!response.ok) {
-        setEditReplyError('Could not save changes.');
-        return;
-      }
-      const newBody = editReplyBody.trim();
-      const editedId = editingReplyId;
-      setReplies((prev) => prev.map((r) => (r.id === editedId ? { ...r, body: newBody, edited: true } : r)));
-      setEditingReplyId(null);
+      if (!response.ok) revert();
     } catch {
-      setEditReplyError('Could not save changes.');
+      revert();
     } finally {
       setIsEditReplySaving(false);
     }
@@ -1114,19 +1154,19 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           <button
             type="button"
             onClick={handleOpenNewThread}
-            disabled={showNewThreadForm || detailThread !== null}
+            disabled={showNewThreadForm}
             style={{
               border: 'none',
               borderRadius: '8px',
               backgroundColor:
-                showNewThreadForm || detailThread !== null
+                showNewThreadForm
                   ? `color-mix(in srgb, ${color} 50%, transparent)`
                   : color,
               color: '#ffffff',
               fontSize: '14px',
               fontWeight: 600,
               padding: '8px 12px',
-              cursor: showNewThreadForm || detailThread !== null ? 'not-allowed' : 'pointer',
+              cursor: showNewThreadForm ? 'not-allowed' : 'pointer',
             }}
           >
             {newThreadLabel}
@@ -1218,464 +1258,6 @@ const ForumWidget: FC<ForumWidgetProps> = ({
               Cancel
             </button>
           </div>
-        </div>
-      ) : detailThread ? (
-        <div style={{ display: 'grid', gap: '14px' }}>
-          <button
-            type="button"
-            onClick={handleBackToList}
-            style={{
-              alignSelf: 'flex-start',
-              border: '1px solid #d1d5db',
-              borderRadius: '8px',
-              backgroundColor: '#ffffff',
-              color: '#374151',
-              fontSize: '14px',
-              fontWeight: 600,
-              padding: '8px 14px',
-              cursor: 'pointer',
-            }}
-          >
-            Back
-          </button>
-
-          {isEditingThread ? (
-            <div style={{ display: 'grid', gap: '10px' }}>
-              <div>
-                <label style={fieldLabelStyle}>Title</label>
-                <input
-                  type="text"
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  style={fieldInputStyle}
-                />
-              </div>
-              <div>
-                <label style={fieldLabelStyle}>Body</label>
-                <textarea
-                  value={editBody}
-                  onChange={(e) => setEditBody(e.target.value)}
-                  style={fieldTextareaStyle}
-                />
-              </div>
-              {editError ? (
-                <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{editError}</p>
-              ) : null}
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={() => void handleSaveEditThread()}
-                  disabled={isEditSaving}
-                  style={{
-                    border: 'none',
-                    borderRadius: '8px',
-                    backgroundColor: color,
-                    opacity: isEditSaving ? 0.6 : 1,
-                    color: '#ffffff',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    padding: '8px 14px',
-                    cursor: isEditSaving ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {isEditSaving ? 'Saving…' : 'Save'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setIsEditingThread(false); setEditError(null); }}
-                  disabled={isEditSaving}
-                  style={{
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    backgroundColor: '#ffffff',
-                    color: '#374151',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    padding: '8px 14px',
-                    cursor: isEditSaving ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>{detailThread.title}</h3>
-              {detailThread.body ? (
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: '14px',
-                    lineHeight: 1.5,
-                    color: '#374151',
-                    whiteSpace: 'pre-wrap',
-                  }}
-                >
-                  {detailThread.body}
-                </p>
-              ) : null}
-              {canEditContent(detailThread.user_id) ? (
-                <button
-                  type="button"
-                  onClick={handleStartEditThread}
-                  style={{
-                    alignSelf: 'flex-start',
-                    justifySelf: 'start',
-                    border: 'none',
-                    background: 'none',
-                    padding: 0,
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: color,
-                    cursor: 'pointer',
-                  }}
-                >
-                  ✏️ Edit
-                </button>
-              ) : null}
-            </>
-          )}
-          <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>
-            {detailThread.author}{isStaff(detailThread.user_id) ? staffBadge : null} • {detailThread.timestamp}{detailThread.edited ? ' (edited)' : ''} • {detailThread.replies}{' '}
-            {detailThread.replies === 1 ? 'reply' : 'replies'}
-          </p>
-          {(() => {
-            const liveThread = threads.find((t) => t.id === detailThread.id);
-            const likeCount = liveThread?.likeCount ?? 0;
-            const likedByMe = liveThread?.likedByMe ?? false;
-            if (subjectType !== 'MEMBER' && likeCount === 0) {
-              return null;
-            }
-            return (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  fontSize: '14px',
-                  color: likedByMe ? color : '#9ca3af',
-                  cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
-                  alignSelf: 'flex-start',
-                  transition: 'transform 0.15s ease, color 0.15s ease',
-                }}
-                onClick={() => {
-                  if (subjectType === 'MEMBER') {
-                    void handleToggleLike(detailThread.id);
-                  }
-                }}
-                onMouseDown={(e) => {
-                  if (subjectType === 'MEMBER') e.currentTarget.style.transform = 'scale(1.4)';
-                }}
-                onMouseUp={(e) => {
-                  e.currentTarget.style.transform = 'scale(1)';
-                }}
-              >
-                {likedByMe ? '❤️' : '🤍'} {likeCount > 0 ? likeCount : ''}
-              </span>
-            );
-          })()}
-
-          <div>
-            <p style={{ margin: '0 0 8px', fontSize: '14px', fontWeight: 600, color: '#111827' }}>
-              Replies
-            </p>
-            {repliesLoading ? (
-              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '8px' }}>
-                {[1, 2].map((i) => (
-                  <li key={i} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '10px', backgroundColor: '#f9fafb' }}>
-                    <div className="forum-skeleton-bar" style={{ height: '12px', borderRadius: '6px', backgroundColor: '#e5e7eb', marginBottom: '8px', width: '30%' }} />
-                    <div className="forum-skeleton-bar" style={{ height: '14px', borderRadius: '6px', backgroundColor: '#e5e7eb', width: `${60 + i * 15}%` }} />
-                  </li>
-                ))}
-              </ul>
-            ) : repliesError ? (
-              <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{repliesError}</p>
-            ) : (
-              <ul
-                style={{
-                  listStyle: 'none',
-                  margin: 0,
-                  padding: 0,
-                  display: 'grid',
-                  gap: '8px',
-                }}
-              >
-                {replies.length === 0 ? (
-                  <li
-                    style={{
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                      padding: '10px',
-                      backgroundColor: '#f9fafb',
-                      fontSize: '14px',
-                      color: '#4b5563',
-                    }}
-                  >
-                    No replies yet.
-                  </li>
-                ) : (
-                  replies.map((reply) => (
-                    <li
-                      key={reply.id}
-                      style={{
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                        padding: '10px',
-                        backgroundColor: '#f9fafb',
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'flex-start',
-                          gap: '8px',
-                          marginBottom: '4px',
-                        }}
-                      >
-                        <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>
-                          {reply.author}{isStaff(reply.user_id) ? staffBadge : null} • {reply.timestamp}{reply.edited ? ' (edited)' : ''}
-                        </p>
-                        <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
-                          {canEditContent(reply.user_id) && editingReplyId !== reply.id ? (
-                            <button
-                              type="button"
-                              title="Edit reply"
-                              aria-label="Edit reply"
-                              onClick={() => handleStartEditReply(reply)}
-                              style={deleteButtonStyle}
-                            >
-                              ✏️
-                            </button>
-                          ) : null}
-                          {canDeleteContent(reply.user_id) ? (
-                            confirmDeleteId === reply.id ? (
-                              <span style={confirmWrapStyle}>
-                                Delete?
-                                <button
-                                  type="button"
-                                  style={confirmYesStyle}
-                                  onClick={() => {
-                                    setConfirmDeleteId(null);
-                                    void handleDeleteReply(reply.id);
-                                  }}
-                                >
-                                  Yes
-                                </button>
-                                <button
-                                  type="button"
-                                  style={confirmNoStyle}
-                                  onClick={() => setConfirmDeleteId(null)}
-                                >
-                                  No
-                                </button>
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                title="Delete reply"
-                                aria-label="Delete reply"
-                                onClick={() => setConfirmDeleteId(reply.id)}
-                                style={deleteButtonStyle}
-                              >
-                                🗑
-                              </button>
-                            )
-                          ) : null}
-                        </div>
-                      </div>
-                      {editingReplyId === reply.id ? (
-                        <div style={{ display: 'grid', gap: '8px' }}>
-                          <textarea
-                            value={editReplyBody}
-                            onChange={(e) => setEditReplyBody(e.target.value)}
-                            style={fieldTextareaStyle}
-                          />
-                          {editReplyError ? (
-                            <p style={{ margin: 0, fontSize: '13px', color: '#b91c1c' }}>{editReplyError}</p>
-                          ) : null}
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            <button
-                              type="button"
-                              onClick={() => void handleSaveEditReply()}
-                              disabled={isEditReplySaving}
-                              style={{
-                                border: 'none',
-                                borderRadius: '8px',
-                                backgroundColor: color,
-                                opacity: isEditReplySaving ? 0.6 : 1,
-                                color: '#ffffff',
-                                fontSize: '13px',
-                                fontWeight: 600,
-                                padding: '6px 12px',
-                                cursor: isEditReplySaving ? 'not-allowed' : 'pointer',
-                              }}
-                            >
-                              {isEditReplySaving ? 'Saving…' : 'Save'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => { setEditingReplyId(null); setEditReplyError(null); }}
-                              disabled={isEditReplySaving}
-                              style={{
-                                border: '1px solid #d1d5db',
-                                borderRadius: '8px',
-                                backgroundColor: '#ffffff',
-                                color: '#374151',
-                                fontSize: '13px',
-                                fontWeight: 600,
-                                padding: '6px 12px',
-                                cursor: isEditReplySaving ? 'not-allowed' : 'pointer',
-                              }}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <p
-                          style={{
-                            margin: 0,
-                            fontSize: '14px',
-                            color: '#111827',
-                            whiteSpace: 'pre-wrap',
-                          }}
-                        >
-                          {reply.body}
-                        </p>
-                      )}
-                      {(subjectType === 'MEMBER' || reply.likeCount > 0) && (
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            fontSize: '12px',
-                            color: reply.likedByMe ? color : '#9ca3af',
-                            cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
-                            marginTop: '4px',
-                            transition: 'transform 0.15s ease, color 0.15s ease',
-                          }}
-                          onClick={() => { if (subjectType === 'MEMBER') void handleToggleReplyLike(reply.id); }}
-                          onMouseDown={(e) => { if (subjectType === 'MEMBER') e.currentTarget.style.transform = 'scale(1.4)'; }}
-                          onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                        >
-                          {reply.likedByMe ? '❤️' : '🤍'} {reply.likeCount > 0 ? reply.likeCount : ''}
-                        </span>
-                      )}
-                    </li>
-                  ))
-                )}
-              </ul>
-            )}
-          </div>
-
-          {repliesMembersOnlyBlock ? (
-            <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>Members only</p>
-          ) : !showReplyForm ? (
-            <button
-              type="button"
-              onClick={handleOpenReplyForm}
-              style={{
-                alignSelf: 'flex-start',
-                border: 'none',
-                borderRadius: '8px',
-                backgroundColor: color,
-                color: '#ffffff',
-                fontSize: '14px',
-                fontWeight: 600,
-                padding: '8px 14px',
-                cursor: 'pointer',
-              }}
-            >
-              Reply
-            </button>
-          ) : (
-            <>
-              {identity.subjectType === 'VISITOR' ? visitorSignUpNudge : null}
-              <div
-                style={{
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '10px',
-                  padding: '12px',
-                  backgroundColor: '#fafafa',
-                  display: 'grid',
-                  gap: '10px',
-                }}
-              >
-              {identity.subjectType === 'VISITOR' && (
-                <div style={{ marginBottom: '12px' }}>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>Your name</label>
-                  <input
-                    type="text"
-                    placeholder="Enter your name"
-                    value={visitorName}
-                    onChange={(e) => setVisitorName(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      border: '1px solid #ccc',
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-              )}
-              <div>
-                <label htmlFor="forum-widget-reply-body" style={fieldLabelStyle}>
-                  Body
-                </label>
-                <textarea
-                  id="forum-widget-reply-body"
-                  value={replyBody}
-                  onChange={(e) => setReplyBody(e.target.value)}
-                  style={fieldTextareaStyle}
-                />
-              </div>
-              {replyFormError ? (
-                <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{replyFormError}</p>
-              ) : null}
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={() => void handleSubmitReply()}
-                  disabled={isReplySubmitting}
-                  style={{
-                    border: 'none',
-                    borderRadius: '8px',
-                    backgroundColor: isReplySubmitting ? '#93c5fd' : color,
-                    color: '#ffffff',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    padding: '8px 14px',
-                    cursor: isReplySubmitting ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {isReplySubmitting ? 'Submitting…' : 'Submit'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCancelReply}
-                  disabled={isReplySubmitting}
-                  style={{
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    backgroundColor: '#ffffff',
-                    color: '#374151',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    padding: '8px 14px',
-                    cursor: isReplySubmitting ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-            </>
-          )}
         </div>
       ) : isEditorMode ? (
         <div style={{ padding: '32px 16px', textAlign: 'center', color: '#6b7280', fontSize: '14px', lineHeight: 1.6 }}>
@@ -1797,133 +1379,534 @@ const ForumWidget: FC<ForumWidgetProps> = ({
               {threads.length === 0 ? 'No threads yet.' : 'No threads match your search.'}
             </li>
           ) : (
-            paginatedThreads.map((thread) => (
-              <li
-                key={thread.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => handleOpenThreadDetail(thread)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    handleOpenThreadDetail(thread);
-                  }
-                }}
-                style={{
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '10px',
-                  padding: '12px',
-                  backgroundColor: '#f9fafb',
-                  cursor: 'pointer',
-                }}
-              >
-                <div
+            paginatedThreads.map((thread) => {
+              const isExpanded = detailThread?.id === thread.id;
+              return (
+                <li
+                  key={thread.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => (isExpanded ? handleBackToList() : handleOpenThreadDetail(thread))}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      if (isExpanded) { handleBackToList(); } else { handleOpenThreadDetail(thread); }
+                    }
+                  }}
                   style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'flex-start',
-                    gap: '8px',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '10px',
+                    padding: '12px',
+                    backgroundColor: '#f9fafb',
+                    cursor: 'pointer',
                   }}
                 >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ margin: '0 0 6px', fontSize: '15px', fontWeight: 600 }}>
-                      {thread.is_pinned ? '📌 ' : ''}{thread.title}
-                    </p>
-                    {thread.body ? (
-                      <p
-                        style={{
-                          margin: '0 0 6px',
-                          fontSize: '14px',
-                          lineHeight: 1.5,
-                          color: '#374151',
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical' as const,
-                          overflow: 'hidden',
-                          wordBreak: 'break-word',
-                        }}
-                      >
-                        {thread.body}
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      gap: '8px',
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {!(isExpanded && isEditingThread) ? (
+                        <>
+                          <p style={{ margin: '0 0 6px', fontSize: '15px', fontWeight: 600 }}>
+                            {thread.is_pinned ? '📌 ' : ''}{thread.title}
+                          </p>
+                          {thread.body ? (
+                            <p
+                              style={{
+                                margin: '0 0 6px',
+                                fontSize: '14px',
+                                lineHeight: 1.5,
+                                color: '#374151',
+                                display: isExpanded ? 'block' : '-webkit-box',
+                                WebkitLineClamp: isExpanded ? 'unset' : 2,
+                                WebkitBoxOrient: 'vertical' as const,
+                                overflow: 'hidden',
+                                wordBreak: 'break-word',
+                                whiteSpace: isExpanded ? 'pre-wrap' : 'normal',
+                              }}
+                            >
+                              {thread.body}
+                            </p>
+                          ) : null}
+                        </>
+                      ) : null}
+                      <p style={{ margin: 0, fontSize: '13px', color: '#4b5563' }}>
+                        {thread.author}{isStaff(thread.user_id) ? staffBadge : null} •{' '}
+                        {thread.replies === 1 ? '1 reply' : `${thread.replies} replies`} •{' '}
+                        {thread.timestamp}{thread.edited ? ' (edited)' : ''}
                       </p>
-                    ) : null}
-                    <p style={{ margin: 0, fontSize: '13px', color: '#4b5563' }}>
-                      {thread.author}{isStaff(thread.user_id) ? staffBadge : null} •{' '}
-                      {thread.replies === 1 ? '1 reply' : `${thread.replies} replies`} •{' '}
-                      {thread.timestamp}{thread.edited ? ' (edited)' : ''}
-                    </p>
-                    {(subjectType === 'MEMBER' || thread.likeCount > 0) && (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          fontSize: '13px',
-                          color: thread.likedByMe ? color : '#9ca3af',
-                          cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
-                          marginTop: '4px',
-                          transition: 'transform 0.15s ease, color 0.15s ease',
-                          transform: 'scale(1)',
-                        }}
-                        onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(1.4)'; }}
-                        onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                        onClick={(e) => {
-                          if (subjectType !== 'MEMBER') return;
-                          e.stopPropagation();
-                          void handleToggleLike(thread.id);
-                        }}
-                      >
-                        {thread.likedByMe ? '❤️' : '🤍'} {thread.likeCount > 0 ? thread.likeCount : ''}
-                      </span>
-                    )}
-                  </div>
-                  {canDeleteContent(thread.user_id) ? (
-                    confirmDeleteId === thread.id ? (
-                      <span
-                        style={confirmWrapStyle}
-                        onClick={(e) => e.stopPropagation()}
-                        onKeyDown={(e) => e.stopPropagation()}
-                      >
-                        Delete?
-                        <button
-                          type="button"
-                          style={confirmYesStyle}
+                      {(subjectType === 'MEMBER' || thread.likeCount > 0) && (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontSize: '13px',
+                            color: thread.likedByMe ? color : '#9ca3af',
+                            cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
+                            marginTop: '4px',
+                            transition: 'transform 0.15s ease, color 0.15s ease',
+                            transform: 'scale(1)',
+                          }}
+                          onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(1.4)'; }}
+                          onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
                           onClick={(e) => {
-                            setConfirmDeleteId(null);
-                            void handleDeleteThread(thread.id, e);
+                            if (subjectType !== 'MEMBER') return;
+                            e.stopPropagation();
+                            void handleToggleLike(thread.id);
                           }}
                         >
-                          Yes
-                        </button>
+                          {thread.likedByMe ? '❤️' : '🤍'} {thread.likeCount > 0 ? thread.likeCount : ''}
+                        </span>
+                      )}
+                    </div>
+                    {canDeleteContent(thread.user_id) ? (
+                      confirmDeleteId === thread.id ? (
+                        <span
+                          style={confirmWrapStyle}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
+                          Delete?
+                          <button
+                            type="button"
+                            style={confirmYesStyle}
+                            onClick={(e) => {
+                              setConfirmDeleteId(null);
+                              void handleDeleteThread(thread.id, e);
+                            }}
+                          >
+                            Yes
+                          </button>
+                          <button
+                            type="button"
+                            style={confirmNoStyle}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmDeleteId(null);
+                            }}
+                          >
+                            No
+                          </button>
+                        </span>
+                      ) : (
                         <button
                           type="button"
-                          style={confirmNoStyle}
+                          title="Delete thread"
+                          aria-label="Delete thread"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setConfirmDeleteId(null);
+                            setConfirmDeleteId(thread.id);
+                          }}
+                          onKeyDown={(e) => e.stopPropagation()}
+                          style={deleteButtonStyle}
+                        >
+                          🗑
+                        </button>
+                      )
+                    ) : null}
+                  </div>
+                  {isExpanded ? (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      style={{
+                        marginTop: '12px',
+                        paddingTop: '12px',
+                        borderTop: '1px solid #e5e7eb',
+                        display: 'grid',
+                        gap: '14px',
+                        cursor: 'default',
+                      }}
+                    >
+                      {isEditingThread ? (
+                        <div style={{ display: 'grid', gap: '10px' }}>
+                          <div>
+                            <label style={fieldLabelStyle}>Title</label>
+                            <input
+                              type="text"
+                              value={editTitle}
+                              onChange={(e) => setEditTitle(e.target.value)}
+                              style={fieldInputStyle}
+                            />
+                          </div>
+                          <div>
+                            <label style={fieldLabelStyle}>Body</label>
+                            <textarea
+                              value={editBody}
+                              onChange={(e) => setEditBody(e.target.value)}
+                              style={fieldTextareaStyle}
+                            />
+                          </div>
+                          {editError ? (
+                            <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{editError}</p>
+                          ) : null}
+                          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              onClick={() => void handleSaveEditThread()}
+                              disabled={isEditSaving}
+                              style={{
+                                border: 'none',
+                                borderRadius: '8px',
+                                backgroundColor: color,
+                                opacity: isEditSaving ? 0.6 : 1,
+                                color: '#ffffff',
+                                fontSize: '14px',
+                                fontWeight: 600,
+                                padding: '8px 14px',
+                                cursor: isEditSaving ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              {isEditSaving ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setIsEditingThread(false); setEditError(null); }}
+                              disabled={isEditSaving}
+                              style={{
+                                border: '1px solid #d1d5db',
+                                borderRadius: '8px',
+                                backgroundColor: '#ffffff',
+                                color: '#374151',
+                                fontSize: '14px',
+                                fontWeight: 600,
+                                padding: '8px 14px',
+                                cursor: isEditSaving ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : canEditContent(thread.user_id) ? (
+                        <button
+                          type="button"
+                          onClick={handleStartEditThread}
+                          style={{
+                            justifySelf: 'start',
+                            border: 'none',
+                            background: 'none',
+                            padding: 0,
+                            fontSize: '13px',
+                            fontWeight: 600,
+                            color: color,
+                            cursor: 'pointer',
                           }}
                         >
-                          No
+                          ✏️ Edit
                         </button>
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        title="Delete thread"
-                        aria-label="Delete thread"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setConfirmDeleteId(thread.id);
-                        }}
-                        onKeyDown={(e) => e.stopPropagation()}
-                        style={deleteButtonStyle}
-                      >
-                        🗑
-                      </button>
-                    )
+                      ) : null}
+                      <div>
+                        <p style={{ margin: '0 0 8px', fontSize: '14px', fontWeight: 600, color: '#111827' }}>
+                          Replies
+                        </p>
+                        {repliesLoading ? (
+                          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '8px' }}>
+                            {[1, 2].map((i) => (
+                              <li key={i} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '10px', backgroundColor: '#f9fafb' }}>
+                                <div className="forum-skeleton-bar" style={{ height: '12px', borderRadius: '6px', backgroundColor: '#e5e7eb', marginBottom: '8px', width: '30%' }} />
+                                <div className="forum-skeleton-bar" style={{ height: '14px', borderRadius: '6px', backgroundColor: '#e5e7eb', width: `${60 + i * 15}%` }} />
+                              </li>
+                            ))}
+                          </ul>
+                        ) : repliesError ? (
+                          <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{repliesError}</p>
+                        ) : (
+                          <ul
+                            style={{
+                              listStyle: 'none',
+                              margin: 0,
+                              padding: 0,
+                              display: 'grid',
+                              gap: '8px',
+                            }}
+                          >
+                            {replies.length === 0 ? (
+                              <li
+                                style={{
+                                  border: '1px solid #e5e7eb',
+                                  borderRadius: '8px',
+                                  padding: '10px',
+                                  backgroundColor: '#f9fafb',
+                                  fontSize: '14px',
+                                  color: '#4b5563',
+                                }}
+                              >
+                                No replies yet.
+                              </li>
+                            ) : (
+                              replies.map((reply) => (
+                                <li
+                                  key={reply.id}
+                                  style={{
+                                    border: '1px solid #e5e7eb',
+                                    borderRadius: '8px',
+                                    padding: '10px',
+                                    backgroundColor: '#f9fafb',
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      alignItems: 'flex-start',
+                                      gap: '8px',
+                                      marginBottom: '4px',
+                                    }}
+                                  >
+                                    <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>
+                                      {reply.author}{isStaff(reply.user_id) ? staffBadge : null} • {reply.timestamp}{reply.edited ? ' (edited)' : ''}
+                                    </p>
+                                    <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
+                                      {canEditContent(reply.user_id) && editingReplyId !== reply.id ? (
+                                        <button
+                                          type="button"
+                                          title="Edit reply"
+                                          aria-label="Edit reply"
+                                          onClick={() => handleStartEditReply(reply)}
+                                          style={deleteButtonStyle}
+                                        >
+                                          ✏️
+                                        </button>
+                                      ) : null}
+                                      {canDeleteContent(reply.user_id) ? (
+                                        confirmDeleteId === reply.id ? (
+                                          <span style={confirmWrapStyle}>
+                                            Delete?
+                                            <button
+                                              type="button"
+                                              style={confirmYesStyle}
+                                              onClick={() => {
+                                                setConfirmDeleteId(null);
+                                                void handleDeleteReply(reply.id);
+                                              }}
+                                            >
+                                              Yes
+                                            </button>
+                                            <button
+                                              type="button"
+                                              style={confirmNoStyle}
+                                              onClick={() => setConfirmDeleteId(null)}
+                                            >
+                                              No
+                                            </button>
+                                          </span>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            title="Delete reply"
+                                            aria-label="Delete reply"
+                                            onClick={() => setConfirmDeleteId(reply.id)}
+                                            style={deleteButtonStyle}
+                                          >
+                                            🗑
+                                          </button>
+                                        )
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  {editingReplyId === reply.id ? (
+                                    <div style={{ display: 'grid', gap: '8px' }}>
+                                      <textarea
+                                        value={editReplyBody}
+                                        onChange={(e) => setEditReplyBody(e.target.value)}
+                                        style={fieldTextareaStyle}
+                                      />
+                                      {editReplyError ? (
+                                        <p style={{ margin: 0, fontSize: '13px', color: '#b91c1c' }}>{editReplyError}</p>
+                                      ) : null}
+                                      <div style={{ display: 'flex', gap: '8px' }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => void handleSaveEditReply()}
+                                          disabled={isEditReplySaving}
+                                          style={{
+                                            border: 'none',
+                                            borderRadius: '8px',
+                                            backgroundColor: color,
+                                            opacity: isEditReplySaving ? 0.6 : 1,
+                                            color: '#ffffff',
+                                            fontSize: '13px',
+                                            fontWeight: 600,
+                                            padding: '6px 12px',
+                                            cursor: isEditReplySaving ? 'not-allowed' : 'pointer',
+                                          }}
+                                        >
+                                          {isEditReplySaving ? 'Saving…' : 'Save'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => { setEditingReplyId(null); setEditReplyError(null); }}
+                                          disabled={isEditReplySaving}
+                                          style={{
+                                            border: '1px solid #d1d5db',
+                                            borderRadius: '8px',
+                                            backgroundColor: '#ffffff',
+                                            color: '#374151',
+                                            fontSize: '13px',
+                                            fontWeight: 600,
+                                            padding: '6px 12px',
+                                            cursor: isEditReplySaving ? 'not-allowed' : 'pointer',
+                                          }}
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p
+                                      style={{
+                                        margin: 0,
+                                        fontSize: '14px',
+                                        color: '#111827',
+                                        whiteSpace: 'pre-wrap',
+                                      }}
+                                    >
+                                      {reply.body}
+                                    </p>
+                                  )}
+                                  {(subjectType === 'MEMBER' || reply.likeCount > 0) && (
+                                    <span
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        fontSize: '12px',
+                                        color: reply.likedByMe ? color : '#9ca3af',
+                                        cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
+                                        marginTop: '4px',
+                                        transition: 'transform 0.15s ease, color 0.15s ease',
+                                      }}
+                                      onClick={() => { if (subjectType === 'MEMBER') void handleToggleReplyLike(reply.id); }}
+                                      onMouseDown={(e) => { if (subjectType === 'MEMBER') e.currentTarget.style.transform = 'scale(1.4)'; }}
+                                      onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                                    >
+                                      {reply.likedByMe ? '❤️' : '🤍'} {reply.likeCount > 0 ? reply.likeCount : ''}
+                                    </span>
+                                  )}
+                                </li>
+                              ))
+                            )}
+                          </ul>
+                        )}
+                      </div>
+                      {repliesMembersOnlyBlock ? (
+                        <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>Members only</p>
+                      ) : !showReplyForm ? (
+                        <button
+                          type="button"
+                          onClick={handleOpenReplyForm}
+                          style={{
+                            alignSelf: 'flex-start',
+                            border: 'none',
+                            borderRadius: '8px',
+                            backgroundColor: color,
+                            color: '#ffffff',
+                            fontSize: '14px',
+                            fontWeight: 600,
+                            padding: '8px 14px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Reply
+                        </button>
+                      ) : (
+                        <>
+                          {identity.subjectType === 'VISITOR' ? visitorSignUpNudge : null}
+                          <div
+                            style={{
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '10px',
+                              padding: '12px',
+                              backgroundColor: '#fafafa',
+                              display: 'grid',
+                              gap: '10px',
+                            }}
+                          >
+                          {identity.subjectType === 'VISITOR' && (
+                            <div style={{ marginBottom: '12px' }}>
+                              <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>Your name</label>
+                              <input
+                                type="text"
+                                placeholder="Enter your name"
+                                value={visitorName}
+                                onChange={(e) => setVisitorName(e.target.value)}
+                                style={{
+                                  width: '100%',
+                                  padding: '8px 12px',
+                                  border: '1px solid #ccc',
+                                  borderRadius: '6px',
+                                  fontSize: '14px',
+                                  boxSizing: 'border-box',
+                                }}
+                              />
+                            </div>
+                          )}
+                          <div>
+                            <label htmlFor="forum-widget-reply-body" style={fieldLabelStyle}>
+                              Body
+                            </label>
+                            <textarea
+                              id="forum-widget-reply-body"
+                              value={replyBody}
+                              onChange={(e) => setReplyBody(e.target.value)}
+                              style={fieldTextareaStyle}
+                            />
+                          </div>
+                          {replyFormError ? (
+                            <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{replyFormError}</p>
+                          ) : null}
+                          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              onClick={() => void handleSubmitReply()}
+                              disabled={isReplySubmitting}
+                              style={{
+                                border: 'none',
+                                borderRadius: '8px',
+                                backgroundColor: isReplySubmitting ? '#93c5fd' : color,
+                                color: '#ffffff',
+                                fontSize: '14px',
+                                fontWeight: 600,
+                                padding: '8px 14px',
+                                cursor: isReplySubmitting ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              {isReplySubmitting ? 'Submitting…' : 'Submit'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleCancelReply}
+                              disabled={isReplySubmitting}
+                              style={{
+                                border: '1px solid #d1d5db',
+                                borderRadius: '8px',
+                                backgroundColor: '#ffffff',
+                                color: '#374151',
+                                fontSize: '14px',
+                                fontWeight: 600,
+                                padding: '8px 14px',
+                                cursor: isReplySubmitting ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                        </>
+                      )}
+                    </div>
                   ) : null}
-                </div>
-              </li>
-            ))
+                </li>
+              );
+            })
           )}
         </ul>
         {totalPages > 1 && (
