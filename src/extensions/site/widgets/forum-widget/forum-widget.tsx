@@ -120,6 +120,52 @@ const formatTimestamp = (rawTimestamp: string | null): string => {
   });
 };
 
+const IconSvg: FC<{ size?: number; fill?: string; children: React.ReactNode }> = ({ size = 16, fill = 'none', children }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill={fill}
+    stroke="currentColor"
+    strokeWidth={2}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+    style={{ display: 'block', flexShrink: 0 }}
+  >
+    {children}
+  </svg>
+);
+
+const HeartIcon: FC<{ filled?: boolean; size?: number }> = ({ filled = false, size = 16 }) => (
+  <IconSvg size={size} fill={filled ? 'currentColor' : 'none'}>
+    <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+  </IconSvg>
+);
+
+const PencilIcon: FC<{ size?: number }> = ({ size = 15 }) => (
+  <IconSvg size={size}>
+    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+  </IconSvg>
+);
+
+const TrashIcon: FC<{ size?: number }> = ({ size = 15 }) => (
+  <IconSvg size={size}>
+    <path d="M3 6h18" />
+    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+  </IconSvg>
+);
+
+const PinIcon: FC<{ size?: number }> = ({ size = 14 }) => (
+  <IconSvg size={size}>
+    <path d="M12 17v5" />
+    <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+  </IconSvg>
+);
+
+const LIKED_COLOR = '#e11d48';
+
 const ForumWidget: FC<ForumWidgetProps> = ({
   title: forumTitle = 'ForumFlow',
   new_thread_label: newThreadLabel = 'New Thread',
@@ -1163,6 +1209,20 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     flexShrink: 0,
   };
 
+  const actionButtonStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    border: 'none',
+    background: 'none',
+    padding: '2px',
+    fontSize: '12px',
+    fontWeight: 600,
+    color: '#6b7280',
+    cursor: 'pointer',
+    lineHeight: 1,
+  };
+
   return (
     <section
       data-who-can-post-threads={who_can_post_threads}
@@ -1453,8 +1513,13 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                     <div style={{ flex: 1, minWidth: 0 }}>
                       {!(isExpanded && isEditingThread) ? (
                         <>
-                          <p style={{ margin: '0 0 6px', fontSize: '15px', fontWeight: 600 }}>
-                            {thread.is_pinned ? '📌 ' : ''}{thread.title}
+                          <p style={{ margin: '0 0 6px', fontSize: isExpanded ? '17px' : '15px', fontWeight: 600 }}>
+                            {thread.is_pinned ? (
+                              <span style={{ display: 'inline-flex', verticalAlign: '-2px', marginRight: '6px', color: color }}>
+                                <PinIcon />
+                              </span>
+                            ) : null}
+                            {thread.title}
                           </p>
                           {thread.body ? (
                             <p
@@ -1488,7 +1553,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                             alignItems: 'center',
                             gap: '4px',
                             fontSize: '13px',
-                            color: thread.likedByMe ? color : '#9ca3af',
+                            fontWeight: 600,
+                            color: thread.likedByMe ? LIKED_COLOR : '#9ca3af',
                             cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
                             marginTop: '4px',
                             transition: 'transform 0.15s ease, color 0.15s ease',
@@ -1502,7 +1568,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                             void handleToggleLike(thread.id);
                           }}
                         >
-                          {thread.likedByMe ? '❤️' : '🤍'} {thread.likeCount > 0 ? thread.likeCount : ''}
+                          <HeartIcon filled={thread.likedByMe} /> {thread.likeCount > 0 ? thread.likeCount : ''}
                         </span>
                       )}
                     </div>
@@ -1545,9 +1611,9 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                             setConfirmDeleteId(thread.id);
                           }}
                           onKeyDown={(e) => e.stopPropagation()}
-                          style={deleteButtonStyle}
+                          style={{ ...deleteButtonStyle, display: 'inline-flex' }}
                         >
-                          🗑
+                          <TrashIcon />
                         </button>
                       )
                     ) : null}
@@ -1638,14 +1704,17 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                             fontWeight: 600,
                             color: color,
                             cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
                           }}
                         >
-                          ✏️ Edit
+                          <PencilIcon size={14} /> Edit
                         </button>
                       ) : null}
                       <div>
                         {repliesLoading ? (
-                          <ul style={{ listStyle: 'none', margin: 0, padding: 0, marginLeft: '12px', paddingLeft: '12px', borderLeft: '2px solid #e5e7eb', display: 'grid', gap: '8px' }}>
+                          <ul style={{ listStyle: 'none', margin: 0, padding: 0, marginLeft: '16px', paddingLeft: 0, display: 'grid', gap: '10px' }}>
                             {[1, 2].map((i) => (
                               <li key={i} style={{ border: 'none', borderRadius: '12px', padding: '10px', backgroundColor: '#f3f4f6' }}>
                                 <div className="forum-skeleton-bar" style={{ height: '12px', borderRadius: '6px', backgroundColor: '#e5e7eb', marginBottom: '8px', width: '30%' }} />
@@ -1661,11 +1730,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                               listStyle: 'none',
                               margin: 0,
                               padding: 0,
-                              marginLeft: '12px',
-                              paddingLeft: '12px',
-                              borderLeft: '2px solid #e5e7eb',
+                              marginLeft: '16px',
+                              paddingLeft: 0,
                               display: 'grid',
-                              gap: '8px',
+                              gap: '10px',
                             }}
                           >
                             {replies.length === 0 ? (
@@ -1676,77 +1744,9 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                               </li>
                             ) : (
                               replies.map((reply) => (
-                                <li
-                                  key={reply.id}
-                                  style={{
-                                    border: 'none',
-                                    borderRadius: '12px',
-                                    padding: '10px',
-                                    backgroundColor: '#f3f4f6',
-                                  }}
-                                >
-                                  <div
-                                    style={{
-                                      display: 'flex',
-                                      justifyContent: 'space-between',
-                                      alignItems: 'flex-start',
-                                      gap: '8px',
-                                      marginBottom: '4px',
-                                    }}
-                                  >
-                                    <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>
-                                      {reply.author}{isStaff(reply.user_id) ? staffBadge : null} • {reply.timestamp}{reply.edited ? ' (edited)' : ''}
-                                    </p>
-                                    <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
-                                      {canEditContent(reply.user_id) && editingReplyId !== reply.id ? (
-                                        <button
-                                          type="button"
-                                          title="Edit reply"
-                                          aria-label="Edit reply"
-                                          onClick={() => handleStartEditReply(reply)}
-                                          style={deleteButtonStyle}
-                                        >
-                                          ✏️
-                                        </button>
-                                      ) : null}
-                                      {canDeleteContent(reply.user_id) ? (
-                                        confirmDeleteId === reply.id ? (
-                                          <span style={confirmWrapStyle}>
-                                            Delete?
-                                            <button
-                                              type="button"
-                                              style={confirmYesStyle}
-                                              onClick={() => {
-                                                setConfirmDeleteId(null);
-                                                void handleDeleteReply(reply.id);
-                                              }}
-                                            >
-                                              Yes
-                                            </button>
-                                            <button
-                                              type="button"
-                                              style={confirmNoStyle}
-                                              onClick={() => setConfirmDeleteId(null)}
-                                            >
-                                              No
-                                            </button>
-                                          </span>
-                                        ) : (
-                                          <button
-                                            type="button"
-                                            title="Delete reply"
-                                            aria-label="Delete reply"
-                                            onClick={() => setConfirmDeleteId(reply.id)}
-                                            style={deleteButtonStyle}
-                                          >
-                                            🗑
-                                          </button>
-                                        )
-                                      ) : null}
-                                    </div>
-                                  </div>
+                                <li key={reply.id} style={{ display: 'grid', gap: '4px', justifyItems: 'start' }}>
                                   {editingReplyId === reply.id ? (
-                                    <div style={{ display: 'grid', gap: '8px' }}>
+                                    <div style={{ display: 'grid', gap: '8px', width: '100%' }}>
                                       <textarea
                                         value={editReplyBody}
                                         onChange={(e) => setEditReplyBody(e.target.value)}
@@ -1772,7 +1772,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                                             cursor: isEditReplySaving ? 'not-allowed' : 'pointer',
                                           }}
                                         >
-                                          {isEditReplySaving ? 'Saving…' : 'Save'}
+                                          Save
                                         </button>
                                         <button
                                           type="button"
@@ -1794,36 +1794,97 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                                       </div>
                                     </div>
                                   ) : (
-                                    <p
+                                    <div
                                       style={{
-                                        margin: 0,
-                                        fontSize: '14px',
-                                        color: '#111827',
-                                        whiteSpace: 'pre-wrap',
+                                        backgroundColor: '#f3f4f6',
+                                        borderRadius: '14px',
+                                        padding: '8px 12px',
+                                        maxWidth: '100%',
+                                        boxSizing: 'border-box',
+                                        wordBreak: 'break-word',
                                       }}
                                     >
-                                      {reply.body}
-                                    </p>
+                                      <p style={{ margin: '0 0 2px', fontSize: '13px', fontWeight: 600, color: '#111827' }}>
+                                        {reply.author}{isStaff(reply.user_id) ? staffBadge : null}
+                                      </p>
+                                      <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.45, color: '#111827', whiteSpace: 'pre-wrap' }}>
+                                        {reply.body}
+                                      </p>
+                                    </div>
                                   )}
-                                  {(subjectType === 'MEMBER' || reply.likeCount > 0) && (
-                                    <span
-                                      style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '4px',
-                                        fontSize: '12px',
-                                        color: reply.likedByMe ? color : '#9ca3af',
-                                        cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
-                                        marginTop: '4px',
-                                        transition: 'transform 0.15s ease, color 0.15s ease',
-                                      }}
-                                      onClick={() => { if (subjectType === 'MEMBER') void handleToggleReplyLike(reply.id); }}
-                                      onMouseDown={(e) => { if (subjectType === 'MEMBER') e.currentTarget.style.transform = 'scale(1.4)'; }}
-                                      onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                                    >
-                                      {reply.likedByMe ? '❤️' : '🤍'} {reply.likeCount > 0 ? reply.likeCount : ''}
-                                    </span>
-                                  )}
+                                  <div
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      flexWrap: 'wrap',
+                                      gap: '12px',
+                                      paddingLeft: '12px',
+                                      fontSize: '12px',
+                                      color: '#6b7280',
+                                    }}
+                                  >
+                                    <span>{reply.timestamp}{reply.edited ? ' · edited' : ''}</span>
+                                    {(subjectType === 'MEMBER' || reply.likeCount > 0) ? (
+                                      <button
+                                        type="button"
+                                        aria-label="Like reply"
+                                        disabled={subjectType !== 'MEMBER'}
+                                        onClick={() => { if (subjectType === 'MEMBER') void handleToggleReplyLike(reply.id); }}
+                                        onMouseDown={(e) => { if (subjectType === 'MEMBER') e.currentTarget.style.transform = 'scale(1.3)'; }}
+                                        onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                                        style={{
+                                          ...actionButtonStyle,
+                                          color: reply.likedByMe ? LIKED_COLOR : '#6b7280',
+                                          cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
+                                          transition: 'transform 0.15s ease, color 0.15s ease',
+                                        }}
+                                      >
+                                        <HeartIcon filled={reply.likedByMe} size={14} />
+                                        {reply.likeCount > 0 ? <span>{reply.likeCount}</span> : null}
+                                      </button>
+                                    ) : null}
+                                    {canEditContent(reply.user_id) && editingReplyId !== reply.id ? (
+                                      <button
+                                        type="button"
+                                        title="Edit reply"
+                                        aria-label="Edit reply"
+                                        onClick={() => handleStartEditReply(reply)}
+                                        style={actionButtonStyle}
+                                      >
+                                        <PencilIcon size={14} />
+                                      </button>
+                                    ) : null}
+                                    {canDeleteContent(reply.user_id) ? (
+                                      confirmDeleteId === reply.id ? (
+                                        <span style={confirmWrapStyle}>
+                                          Delete?
+                                          <button
+                                            type="button"
+                                            style={confirmYesStyle}
+                                            onClick={() => {
+                                              setConfirmDeleteId(null);
+                                              void handleDeleteReply(reply.id);
+                                            }}
+                                          >
+                                            Yes
+                                          </button>
+                                          <button type="button" style={confirmNoStyle} onClick={() => setConfirmDeleteId(null)}>
+                                            No
+                                          </button>
+                                        </span>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          title="Delete reply"
+                                          aria-label="Delete reply"
+                                          onClick={() => setConfirmDeleteId(reply.id)}
+                                          style={actionButtonStyle}
+                                        >
+                                          <TrashIcon size={14} />
+                                        </button>
+                                      )
+                                    ) : null}
+                                  </div>
                                 </li>
                               ))
                             )}
@@ -1833,7 +1894,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                       {repliesMembersOnlyBlock ? (
                         <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>Only members can reply.</p>
                       ) : (
-                        <div style={{ display: 'grid', gap: '8px', marginLeft: '12px', paddingLeft: '14px' }}>
+                        <div style={{ display: 'grid', gap: '8px', marginLeft: '16px', paddingLeft: 0 }}>
                           {subjectType === 'VISITOR' ? visitorSignUpNudge : null}
                           {subjectType === 'VISITOR' ? (
                             <input
