@@ -21,10 +21,12 @@ export async function POST({ request }: { request: Request }) {
     const body = (await request.json()) as CreateThreadBody;
     let userId: string | undefined;
     let subjectType: string | undefined;
+    let instanceId: string | undefined;
     try {
       const tokenInfo = await auth.getTokenInfo();
       userId = tokenInfo.subjectId;
       subjectType = tokenInfo.subjectType;
+      instanceId = tokenInfo.instanceId;
     } catch {
       return new Response(JSON.stringify({ error: "You must be logged in to post." }), {
         status: 401,
@@ -89,9 +91,6 @@ export async function POST({ request }: { request: Request }) {
       );
     }
 
-    const appTokenInfo = await auth.getTokenInfo();
-    const instanceId = appTokenInfo.instanceId;
-
     if (!instanceId) {
       return new Response(JSON.stringify({ error: "Missing instanceId" }), {
         status: 401,
@@ -117,23 +116,23 @@ export async function POST({ request }: { request: Request }) {
         });
       }
 
-      // Plan limit check
+      // Plan limit check: count first, check the plan only when the free limit is reached
       try {
-        const elevatedGetAppInstance = auth.elevate(appInstances.getAppInstance);
-        const instanceResponse = await elevatedGetAppInstance();
-        const isFree = instanceResponse.instance?.isFree ?? true;
-        if (isFree) {
-          const countRes = await fetch(
-            `${supabaseUrl}/rest/v1/threads?site_id=eq.${encodeURIComponent(instanceId)}&select=id`,
-            {
-              headers: {
-                apikey: supabaseServiceRoleKey,
-                Authorization: `Bearer ${supabaseServiceRoleKey}`,
-              },
-            }
-          );
-          const rows = (await countRes.json()) as { id: string }[];
-          if (Array.isArray(rows) && rows.length >= 25) {
+        const countRes = await fetch(
+          `${supabaseUrl}/rest/v1/threads?site_id=eq.${encodeURIComponent(instanceId)}&select=id`,
+          {
+            headers: {
+              apikey: supabaseServiceRoleKey,
+              Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            },
+          }
+        );
+        const rows = (await countRes.json()) as { id: string }[];
+        if (Array.isArray(rows) && rows.length >= 25) {
+          const elevatedGetAppInstance = auth.elevate(appInstances.getAppInstance);
+          const instanceResponse = await elevatedGetAppInstance();
+          const isFree = instanceResponse.instance?.isFree ?? true;
+          if (isFree) {
             return new Response(
               JSON.stringify({ error: "LIMIT_REACHED", type: "threads" }),
               { status: 403, headers: { "Content-Type": "application/json" } }
@@ -198,23 +197,23 @@ export async function POST({ request }: { request: Request }) {
         });
       }
 
-      // Plan limit check
+      // Plan limit check: count first, check the plan only when the free limit is reached
       try {
-        const elevatedGetAppInstance = auth.elevate(appInstances.getAppInstance);
-        const instanceResponse = await elevatedGetAppInstance();
-        const isFree = instanceResponse.instance?.isFree ?? true;
-        if (isFree) {
-          const countRes = await fetch(
-            `${supabaseUrl}/rest/v1/replies?site_id=eq.${encodeURIComponent(instanceId)}&select=id`,
-            {
-              headers: {
-                apikey: supabaseServiceRoleKey,
-                Authorization: `Bearer ${supabaseServiceRoleKey}`,
-              },
-            }
-          );
-          const rows = (await countRes.json()) as { id: string }[];
-          if (Array.isArray(rows) && rows.length >= 50) {
+        const countRes = await fetch(
+          `${supabaseUrl}/rest/v1/replies?site_id=eq.${encodeURIComponent(instanceId)}&select=id`,
+          {
+            headers: {
+              apikey: supabaseServiceRoleKey,
+              Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            },
+          }
+        );
+        const rows = (await countRes.json()) as { id: string }[];
+        if (Array.isArray(rows) && rows.length >= 50) {
+          const elevatedGetAppInstance = auth.elevate(appInstances.getAppInstance);
+          const instanceResponse = await elevatedGetAppInstance();
+          const isFree = instanceResponse.instance?.isFree ?? true;
+          if (isFree) {
             return new Response(
               JSON.stringify({ error: "LIMIT_REACHED", type: "replies" }),
               { status: 403, headers: { "Content-Type": "application/json" } }

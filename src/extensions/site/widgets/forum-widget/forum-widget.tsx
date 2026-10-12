@@ -150,7 +150,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const [subjectType, setSubjectType] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [staffUserIds, setStaffUserIds] = useState<string[]>([]);
-  const [isFree, setIsFree] = useState(true);
+  const [isFree, setIsFree] = useState<boolean | null>(null);
   const [visitorName, setVisitorName] = useState('');
   const [isEditingThread, setIsEditingThread] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -388,9 +388,11 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           .fetchWithAuth(`${baseApiUrl}/api/forum?action=get_plan`)
           .then((r) => (r.ok ? (r.json() as Promise<{ isFree?: boolean }>) : null))
           .then((planData) => {
-            if (!cancelled && planData) setIsFree(planData.isFree ?? true);
+            if (!cancelled) setIsFree(planData?.isFree ?? true);
           })
-          .catch(() => {});
+          .catch(() => {
+            if (!cancelled) setIsFree(true);
+          });
         const response = await httpClient.fetchWithAuth(
           `${baseApiUrl}/api/forum?action=get_threads_with_identity`
         );
@@ -1861,7 +1863,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         )}
         </>
       )}
-      {isFree && (
+      {isFree === true && (
         <div style={{
           marginTop: '12px',
           paddingTop: '10px',
