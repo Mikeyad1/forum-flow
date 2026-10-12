@@ -229,7 +229,7 @@ const SettingsPanel: FC = () => {
           checked={replyNotifications}
           onChange={updateReplyNotifications}
         />
-        Email members when someone replies to their threads
+        Let members get email notifications for replies to their threads
       </label>
     </section>
   );

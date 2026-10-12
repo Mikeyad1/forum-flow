@@ -814,7 +814,7 @@ export async function GET({ request }: { request: Request }) {
     if (action === "get_threads_with_identity") {
       const authHeader = request.headers.get("authorization");
 
-      const [identityResult, threadsResponse, staffResponse] = await Promise.all([
+      const [identityResult, threadsResponse, staffResponse, threadLikesResponse] = await Promise.all([
         authHeader
           ? fetch("https://www.wixapis.com/oauth2/token-info", {
               method: "POST",
@@ -835,6 +835,15 @@ export async function GET({ request }: { request: Request }) {
         ),
         fetch(
           `${supabaseUrl}/rest/v1/staff?site_id=eq.${encodeURIComponent(instanceId)}&select=user_id`,
+          {
+            headers: {
+              apikey: supabaseServiceRoleKey,
+              Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            },
+          }
+        ),
+        fetch(
+          `${supabaseUrl}/rest/v1/thread_likes?site_id=eq.${encodeURIComponent(instanceId)}&select=thread_id,user_id`,
           {
             headers: {
               apikey: supabaseServiceRoleKey,
@@ -920,6 +929,30 @@ export async function GET({ request }: { request: Request }) {
       if (staffResponse.ok) {
         const staffRows = (await staffResponse.json()) as { user_id: string }[];
         staffUserIds = Array.isArray(staffRows) ? staffRows.map((r) => r.user_id) : [];
+      }
+
+      const likeCurrentUserId =
+        identityResult?.subjectType === "MEMBER" ? (identityResult.subjectId ?? null) : null;
+      const threadLikeCounts: Record<string, number> = {};
+      const threadLikedByMe = new Set<string>();
+      if (threadLikesResponse.ok) {
+        const likeRows = (await threadLikesResponse.json()) as { thread_id: string; user_id: string }[];
+        if (Array.isArray(likeRows)) {
+          for (const like of likeRows) {
+            const tid = String(like.thread_id);
+            threadLikeCounts[tid] = (threadLikeCounts[tid] ?? 0) + 1;
+            if (likeCurrentUserId && like.user_id === likeCurrentUserId) {
+              threadLikedByMe.add(tid);
+            }
+          }
+        }
+      }
+      if (Array.isArray(threads)) {
+        threads = threads.map((t) => {
+          const row = t as Record<string, unknown>;
+          const tid = String(row.id);
+          return { ...row, likeCount: threadLikeCounts[tid] ?? 0, likedByMe: threadLikedByMe.has(tid) };
+        });
       }
 
       return new Response(

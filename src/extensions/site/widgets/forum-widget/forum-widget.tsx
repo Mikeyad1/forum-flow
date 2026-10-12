@@ -31,6 +31,8 @@ type ThreadRow = {
   created_at: string | null;
   is_pinned: boolean | null;
   edited_at?: string | null;
+  likeCount?: number;
+  likedByMe?: boolean;
 };
 
 type Reply = {
@@ -470,26 +472,12 @@ const ForumWidget: FC<ForumWidgetProps> = ({
             body: thread.body ?? '',
             user_id: thread.user_id ?? null,
           is_pinned: thread.is_pinned ?? false,
-          likeCount: 0,
-          likedByMe: false,
+          likeCount: thread.likeCount ?? 0,
+          likedByMe: thread.likedByMe ?? false,
           edited: !!thread.edited_at,
           }))
         );
         setIsLoading(false);
-
-        const threadIds = data.threads.map((t: ThreadRow) => t.id);
-        if (threadIds.length > 0) {
-          const threadLikes = await fetchLikesBulk('get_likes_bulk', threadIds);
-          if (!cancelled) {
-            setThreads((prev) =>
-              prev.map((t) =>
-                threadLikes[t.id]
-                  ? { ...t, likeCount: threadLikes[t.id].likeCount, likedByMe: threadLikes[t.id].likedByMe }
-                  : t
-              )
-            );
-          }
-        }
       } catch {
         if (!cancelled) setErrorMessage('Could not load forum.');
       } finally {
@@ -1446,10 +1434,11 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                     }
                   }}
                   style={{
-                    border: '1px solid #e5e7eb',
+                    border: isExpanded ? `1px solid ${color}` : '1px solid #e5e7eb',
                     borderRadius: '10px',
                     padding: '12px',
-                    backgroundColor: '#f9fafb',
+                    backgroundColor: isExpanded ? '#ffffff' : '#f9fafb',
+                    boxShadow: isExpanded ? '0 1px 6px rgba(0, 0, 0, 0.06)' : 'none',
                     cursor: 'pointer',
                   }}
                 >
@@ -1655,13 +1644,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                         </button>
                       ) : null}
                       <div>
-                        <p style={{ margin: '0 0 8px', fontSize: '14px', fontWeight: 600, color: '#111827' }}>
-                          Replies
-                        </p>
                         {repliesLoading ? (
-                          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '8px' }}>
+                          <ul style={{ listStyle: 'none', margin: 0, padding: 0, marginLeft: '12px', paddingLeft: '12px', borderLeft: '2px solid #e5e7eb', display: 'grid', gap: '8px' }}>
                             {[1, 2].map((i) => (
-                              <li key={i} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '10px', backgroundColor: '#f9fafb' }}>
+                              <li key={i} style={{ border: 'none', borderRadius: '12px', padding: '10px', backgroundColor: '#f3f4f6' }}>
                                 <div className="forum-skeleton-bar" style={{ height: '12px', borderRadius: '6px', backgroundColor: '#e5e7eb', marginBottom: '8px', width: '30%' }} />
                                 <div className="forum-skeleton-bar" style={{ height: '14px', borderRadius: '6px', backgroundColor: '#e5e7eb', width: `${60 + i * 15}%` }} />
                               </li>
@@ -1675,20 +1661,16 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                               listStyle: 'none',
                               margin: 0,
                               padding: 0,
+                              marginLeft: '12px',
+                              paddingLeft: '12px',
+                              borderLeft: '2px solid #e5e7eb',
                               display: 'grid',
                               gap: '8px',
                             }}
                           >
                             {replies.length === 0 ? (
                               <li
-                                style={{
-                                  border: '1px solid #e5e7eb',
-                                  borderRadius: '8px',
-                                  padding: '10px',
-                                  backgroundColor: '#f9fafb',
-                                  fontSize: '14px',
-                                  color: '#4b5563',
-                                }}
+                                style={{ border: 'none', backgroundColor: 'transparent', padding: '2px 0', fontSize: '13px', color: '#6b7280' }}
                               >
                                 No replies yet.
                               </li>
@@ -1697,10 +1679,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                                 <li
                                   key={reply.id}
                                   style={{
-                                    border: '1px solid #e5e7eb',
-                                    borderRadius: '8px',
+                                    border: 'none',
+                                    borderRadius: '12px',
                                     padding: '10px',
-                                    backgroundColor: '#f9fafb',
+                                    backgroundColor: '#f3f4f6',
                                   }}
                                 >
                                   <div
@@ -1849,109 +1831,60 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                         )}
                       </div>
                       {repliesMembersOnlyBlock ? (
-                        <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>Members only</p>
-                      ) : !showReplyForm ? (
-                        <button
-                          type="button"
-                          onClick={handleOpenReplyForm}
-                          style={{
-                            alignSelf: 'flex-start',
-                            border: 'none',
-                            borderRadius: '8px',
-                            backgroundColor: color,
-                            color: '#ffffff',
-                            fontSize: '14px',
-                            fontWeight: 600,
-                            padding: '8px 14px',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Reply
-                        </button>
+                        <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>Only members can reply.</p>
                       ) : (
-                        <>
-                          {identity.subjectType === 'VISITOR' ? visitorSignUpNudge : null}
-                          <div
-                            style={{
-                              border: '1px solid #e5e7eb',
-                              borderRadius: '10px',
-                              padding: '12px',
-                              backgroundColor: '#fafafa',
-                              display: 'grid',
-                              gap: '10px',
-                            }}
-                          >
-                          {identity.subjectType === 'VISITOR' && (
-                            <div style={{ marginBottom: '12px' }}>
-                              <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>Your name</label>
-                              <input
-                                type="text"
-                                placeholder="Enter your name"
-                                value={visitorName}
-                                onChange={(e) => setVisitorName(e.target.value)}
-                                style={{
-                                  width: '100%',
-                                  padding: '8px 12px',
-                                  border: '1px solid #ccc',
-                                  borderRadius: '6px',
-                                  fontSize: '14px',
-                                  boxSizing: 'border-box',
-                                }}
-                              />
-                            </div>
-                          )}
-                          <div>
-                            <label htmlFor="forum-widget-reply-body" style={fieldLabelStyle}>
-                              Body
-                            </label>
+                        <div style={{ display: 'grid', gap: '8px', marginLeft: '12px', paddingLeft: '14px' }}>
+                          {subjectType === 'VISITOR' ? visitorSignUpNudge : null}
+                          {subjectType === 'VISITOR' ? (
+                            <input
+                              type="text"
+                              placeholder="Your name"
+                              value={visitorName}
+                              onChange={(e) => setVisitorName(e.target.value)}
+                              style={fieldInputStyle}
+                            />
+                          ) : null}
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
                             <textarea
-                              id="forum-widget-reply-body"
+                              placeholder="Write a reply…"
                               value={replyBody}
                               onChange={(e) => setReplyBody(e.target.value)}
-                              style={fieldTextareaStyle}
+                              rows={1}
+                              style={{
+                                ...fieldInputStyle,
+                                flex: 1,
+                                minHeight: '40px',
+                                resize: 'vertical',
+                                borderRadius: '18px',
+                                padding: '9px 14px',
+                                backgroundColor: '#f3f4f6',
+                                border: '1px solid transparent',
+                              }}
                             />
-                          </div>
-                          {replyFormError ? (
-                            <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{replyFormError}</p>
-                          ) : null}
-                          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                             <button
                               type="button"
                               onClick={() => void handleSubmitReply()}
-                              disabled={isReplySubmitting}
+                              disabled={!replyBody.trim()}
                               style={{
                                 border: 'none',
-                                borderRadius: '8px',
-                                backgroundColor: isReplySubmitting ? '#93c5fd' : color,
+                                borderRadius: '18px',
+                                backgroundColor: color,
+                                opacity: replyBody.trim() ? 1 : 0.5,
                                 color: '#ffffff',
                                 fontSize: '14px',
                                 fontWeight: 600,
-                                padding: '8px 14px',
-                                cursor: isReplySubmitting ? 'not-allowed' : 'pointer',
+                                padding: '9px 16px',
+                                cursor: replyBody.trim() ? 'pointer' : 'not-allowed',
+                                flexShrink: 0,
                               }}
                             >
-                              {isReplySubmitting ? 'Submitting…' : 'Submit'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleCancelReply}
-                              disabled={isReplySubmitting}
-                              style={{
-                                border: '1px solid #d1d5db',
-                                borderRadius: '8px',
-                                backgroundColor: '#ffffff',
-                                color: '#374151',
-                                fontSize: '14px',
-                                fontWeight: 600,
-                                padding: '8px 14px',
-                                cursor: isReplySubmitting ? 'not-allowed' : 'pointer',
-                              }}
-                            >
-                              Cancel
+                              Reply
                             </button>
                           </div>
+                          {replyFormError ? (
+                            <p style={{ margin: 0, fontSize: '13px', color: '#b91c1c' }}>{replyFormError}</p>
+                          ) : null}
                         </div>
-                        </>
                       )}
                     </div>
                   ) : null}
