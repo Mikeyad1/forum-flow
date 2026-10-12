@@ -1681,6 +1681,88 @@ export async function GET({ request }: { request: Request }) {
         headers: { "Content-Type": "application/json" },
       });
 
+    } else if (action === "get_replies_bulk") {
+      const threadIds = (url.searchParams.get("thread_ids") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => /^[A-Za-z0-9-]{1,64}$/.test(s))
+        .slice(0, 50);
+
+      if (threadIds.length === 0) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const sbHeaders = {
+        apikey: supabaseServiceRoleKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+      };
+
+      const repliesRes = await fetch(
+        `${supabaseUrl}/rest/v1/replies?site_id=eq.${encodeURIComponent(instanceId)}&thread_id=in.(${threadIds.map((id) => encodeURIComponent(id)).join(",")})&select=*&order=created_at.asc`,
+        { headers: sbHeaders }
+      );
+
+      if (!repliesRes.ok) {
+        return new Response(JSON.stringify({ error: "Failed to load replies" }), {
+          status: 502,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const replyRowsRaw = (await repliesRes.json()) as ({ id: string; thread_id: string } & Record<string, unknown>)[];
+      const replyRows = Array.isArray(replyRowsRaw) ? replyRowsRaw : [];
+
+      const replyIds = replyRows.map((r) => String(r.id));
+      const idChunks: string[][] = [];
+      for (let i = 0; i < replyIds.length; i += 100) {
+        idChunks.push(replyIds.slice(i, i + 100));
+      }
+
+      const likeParts = await Promise.all(
+        idChunks.map((chunk) =>
+          fetch(
+            `${supabaseUrl}/rest/v1/reply_likes?site_id=eq.${encodeURIComponent(instanceId)}&reply_id=in.(${chunk.map((id) => encodeURIComponent(id)).join(",")})&select=reply_id,user_id`,
+            { headers: sbHeaders }
+          )
+            .then((r) => (r.ok ? (r.json() as Promise<{ reply_id: string; user_id: string }[]>) : []))
+            .catch(() => [] as { reply_id: string; user_id: string }[])
+        )
+      );
+
+      const currentUserId =
+        tokenInfo.subjectType === "MEMBER" ? (tokenInfo.subjectId ?? null) : null;
+      const likeCounts: Record<string, number> = {};
+      const likedByMeSet = new Set<string>();
+      for (const part of likeParts) {
+        if (!Array.isArray(part)) continue;
+        for (const like of part) {
+          const rid = String(like.reply_id);
+          likeCounts[rid] = (likeCounts[rid] ?? 0) + 1;
+          if (currentUserId && like.user_id === currentUserId) {
+            likedByMeSet.add(rid);
+          }
+        }
+      }
+
+      const result: Record<string, unknown[]> = {};
+      for (const id of threadIds) {
+        result[id] = [];
+      }
+      for (const row of replyRows) {
+        const bucket = result[String(row.thread_id)];
+        if (!bucket) continue;
+        const rid = String(row.id);
+        bucket.push({ ...row, likeCount: likeCounts[rid] ?? 0, likedByMe: likedByMeSet.has(rid) });
+      }
+
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
     } else if (action === "get_plan") {
       try {
         const cachedPlan = await readCachedPlan(supabaseUrl, supabaseServiceRoleKey, instanceId);

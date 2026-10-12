@@ -53,6 +53,8 @@ type ReplyRow = {
   user_id: string | null;
   created_at: string | null;
   edited_at?: string | null;
+  likeCount?: number;
+  likedByMe?: boolean;
 };
 
 type ForumWidgetProps = {
@@ -170,6 +172,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   useEffect(() => {
     expandedIdRef.current = detailThread?.id ?? null;
   }, [detailThread?.id]);
+  const repliesCacheRef = useRef<Record<string, Reply[]>>({});
+  const prefetchingRef = useRef<Set<string>>(new Set());
 
   const confirmWrapStyle: React.CSSProperties = {
     display: 'inline-flex',
@@ -291,6 +295,34 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     return merged;
   };
 
+  const mapReplyRow = (row: ReplyRow): Reply => ({
+    id: row.id,
+    author: row.user_name ?? row.author_name ?? 'Unknown author',
+    body: row.body ?? '',
+    timestamp: formatTimestamp(row.created_at),
+    user_id: row.user_id ?? null,
+    likeCount: row.likeCount ?? 0,
+    likedByMe: row.likedByMe ?? false,
+    edited: !!row.edited_at,
+  });
+
+  const fetchRepliesBulk = async (threadIds: string[]): Promise<Record<string, Reply[]> | null> => {
+    try {
+      const response = await httpClient.fetchWithAuth(
+        `${baseApiUrl}/api/forum?action=get_replies_bulk&thread_ids=${encodeURIComponent(threadIds.join(','))}`
+      );
+      if (!response.ok) return null;
+      const data = (await response.json()) as Record<string, ReplyRow[]>;
+      const mapped: Record<string, Reply[]> = {};
+      for (const [threadId, rows] of Object.entries(data ?? {})) {
+        mapped[threadId] = Array.isArray(rows) ? rows.map(mapReplyRow) : [];
+      }
+      return mapped;
+    } catch {
+      return null;
+    }
+  };
+
   const loadThreads = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage(null);
@@ -341,58 +373,29 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   }, []);
 
   const loadReplies = useCallback(async (threadId: string) => {
-    setRepliesLoading(true);
-    setRepliesError(null);
-
+    const hasCache = !!repliesCacheRef.current[threadId];
+    if (!hasCache) {
+      setRepliesLoading(true);
+      setRepliesError(null);
+    }
     try {
-      const response = await httpClient.fetchWithAuth(
-        `${baseApiUrl}/api/forum?action=get_replies&thread_id=${encodeURIComponent(threadId)}`
-      );
-
-      if (!response.ok) {
-        setRepliesError(
-          response.status === 401
-            ? 'You need to log in to view replies.'
-            : 'Could not load replies.',
-        );
-        setReplies([]);
+      const result = await fetchRepliesBulk([threadId]);
+      if (!result) {
+        if (!hasCache && expandedIdRef.current === threadId) {
+          setRepliesError('Could not load replies.');
+          setReplies([]);
+        }
         return;
       }
-
-      const data = (await response.json()) as ReplyRow[];
-
-      if (!Array.isArray(data)) {
-        setRepliesError('Could not load replies.');
-        setReplies([]);
-        return;
+      const fresh = result[threadId] ?? [];
+      repliesCacheRef.current[threadId] = fresh;
+      if (expandedIdRef.current === threadId) {
+        setReplies((prev) => [...fresh, ...prev.filter((r) => r.pending)]);
       }
-
-      const mappedReplies = data.map((row) => ({
-        id: row.id,
-        author: row.user_name ?? row.author_name ?? 'Unknown author',
-        body: row.body ?? '',
-        timestamp: formatTimestamp(row.created_at),
-        user_id: row.user_id ?? null,
-        likeCount: 0,
-        likedByMe: false,
-        edited: !!row.edited_at,
-      }));
-      setReplies(mappedReplies);
-      setRepliesLoading(false);
-
-      const replyLikes = await fetchLikesBulk(
-        'get_reply_likes_bulk',
-        mappedReplies.map((r) => r.id),
-      );
-      setReplies((prev) =>
-        prev.map((r) =>
-          replyLikes[r.id]
-            ? { ...r, likeCount: replyLikes[r.id].likeCount, likedByMe: replyLikes[r.id].likedByMe }
-            : r
-        )
-      );
     } finally {
-      setRepliesLoading(false);
+      if (expandedIdRef.current === threadId) {
+        setRepliesLoading(false);
+      }
     }
   }, []);
 
@@ -507,6 +510,42 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     void loadReplies(detailThread.id);
   }, [detailThread?.id, loadReplies]);
 
+  const pageThreadKey = paginatedThreads
+    .filter((t) => !t.pending)
+    .map((t) => t.id)
+    .join(',');
+
+  useEffect(() => {
+    if (isEditorMode || isLoading || !pageThreadKey) return;
+    const timer = setTimeout(() => {
+      const need: string[] = [];
+      for (const t of paginatedThreads) {
+        if (t.pending) continue;
+        if (repliesCacheRef.current[t.id] || prefetchingRef.current.has(t.id)) continue;
+        if (t.replies === 0) {
+          repliesCacheRef.current[t.id] = [];
+          continue;
+        }
+        need.push(t.id);
+      }
+      if (need.length === 0) return;
+      need.forEach((id) => prefetchingRef.current.add(id));
+      void fetchRepliesBulk(need)
+        .then((result) => {
+          if (!result) return;
+          for (const id of need) {
+            if (result[id] && !repliesCacheRef.current[id]) {
+              repliesCacheRef.current[id] = result[id];
+            }
+          }
+        })
+        .finally(() => {
+          need.forEach((id) => prefetchingRef.current.delete(id));
+        });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [pageThreadKey, isEditorMode, isLoading]);
+
   const resetFormFields = () => {
     setTitle('');
     setBody('');
@@ -518,8 +557,19 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     setReplyFormError(null);
   };
 
+  const saveExpandedToCache = () => {
+    if (detailThread && !repliesLoading) {
+      repliesCacheRef.current[detailThread.id] = replies.filter((r) => !r.pending);
+    }
+  };
+
   const handleOpenThreadDetail = (thread: Thread) => {
     if (thread.pending) return;
+    saveExpandedToCache();
+    const cached = repliesCacheRef.current[thread.id];
+    setReplies(cached ?? []);
+    setRepliesLoading(!cached);
+    setRepliesError(null);
     setDetailThread(thread);
     setShowReplyForm(false);
     resetReplyForm();
@@ -530,6 +580,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   };
 
   const handleBackToList = () => {
+    saveExpandedToCache();
     setDetailThread(null);
     setShowReplyForm(false);
     resetReplyForm();
