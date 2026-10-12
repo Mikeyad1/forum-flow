@@ -393,6 +393,15 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           .catch(() => {
             if (!cancelled) setIsFree(true);
           });
+        httpClient
+          .fetchWithAuth(`${baseApiUrl}/api/forum?action=get_notify_pref`)
+          .then((r) => (r.ok ? (r.json() as Promise<{ eligible?: boolean; enabled?: boolean }>) : null))
+          .then((pref) => {
+            if (!cancelled && pref?.eligible) {
+              setNotifyEnabled(pref.enabled ?? true);
+            }
+          })
+          .catch(() => {});
         const response = await httpClient.fetchWithAuth(
           `${baseApiUrl}/api/forum?action=get_threads_with_identity`
         );
@@ -412,18 +421,6 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         setSubjectType(data.subjectType ?? null);
         setUserId(data.userId ?? null);
         setStaffUserIds(Array.isArray(data.staffUserIds) ? data.staffUserIds : []);
-        if (data.subjectType === 'MEMBER') {
-          httpClient
-            .fetchWithAuth(`${baseApiUrl}/api/forum?action=get_notify_pref`)
-            .then((r) => (r.ok ? (r.json() as Promise<{ eligible?: boolean; enabled?: boolean }>) : null))
-            .then((pref) => {
-              if (!cancelled && pref?.eligible) {
-                setNotifyEnabled(pref.enabled ?? true);
-              }
-            })
-            .catch(() => {});
-        }
-
         setThreads(
           data.threads.map((thread: ThreadRow) => ({
             id: thread.id,
@@ -1649,9 +1646,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{errorMessage}</p>
       ) : (
         <>
-          {subjectType === 'MEMBER' && notifyEnabled !== null && replyNotificationsOn && (
+          {subjectType === 'MEMBER' && replyNotificationsOn && (
             <label
               style={{
+                visibility: notifyEnabled === null ? 'hidden' : 'visible',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
@@ -1663,8 +1661,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
             >
               <input
                 type="checkbox"
-                checked={notifyEnabled}
-                disabled={notifySaving}
+                checked={notifyEnabled ?? true}
+                disabled={notifySaving || notifyEnabled === null}
                 onChange={() => void handleToggleNotify()}
                 style={{ accentColor: color }}
               />

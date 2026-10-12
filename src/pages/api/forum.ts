@@ -16,6 +16,65 @@ type CreateThreadBody = {
   reply_notifications?: string | boolean;
 };
 
+const PLAN_CACHE_TTL_MS = 15 * 60 * 1000;
+
+type CachedPlan = { isFree: boolean; fresh: boolean } | null;
+
+async function readCachedPlan(
+  supabaseUrl: string,
+  serviceKey: string,
+  instanceId: string
+): Promise<CachedPlan> {
+  try {
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/site_plans?site_id=eq.${encodeURIComponent(instanceId)}&select=is_free,checked_at`,
+      {
+        headers: {
+          apikey: serviceKey,
+          Authorization: `Bearer ${serviceKey}`,
+        },
+      }
+    );
+    if (!res.ok) return null;
+    const rows = (await res.json()) as { is_free: boolean; checked_at: string }[];
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const checkedMs = new Date(rows[0].checked_at).getTime();
+    const fresh = Number.isFinite(checkedMs) && Date.now() - checkedMs < PLAN_CACHE_TTL_MS;
+    return { isFree: rows[0].is_free === true, fresh };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchLivePlanAndCache(
+  supabaseUrl: string,
+  serviceKey: string,
+  instanceId: string
+): Promise<boolean> {
+  const elevatedGetAppInstance = auth.elevate(appInstances.getAppInstance);
+  const instanceResponse = await elevatedGetAppInstance();
+  const isFree = instanceResponse.instance?.isFree ?? true;
+  try {
+    await fetch(`${supabaseUrl}/rest/v1/site_plans?on_conflict=site_id`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify({
+        site_id: instanceId,
+        is_free: isFree,
+        checked_at: new Date().toISOString(),
+      }),
+    });
+  } catch {
+    // Cache write is best-effort
+  }
+  return isFree;
+}
+
 export async function POST({ request }: { request: Request }) {
   try {
     const body = (await request.json()) as CreateThreadBody;
@@ -129,9 +188,11 @@ export async function POST({ request }: { request: Request }) {
         );
         const rows = (await countRes.json()) as { id: string }[];
         if (Array.isArray(rows) && rows.length >= 25) {
-          const elevatedGetAppInstance = auth.elevate(appInstances.getAppInstance);
-          const instanceResponse = await elevatedGetAppInstance();
-          const isFree = instanceResponse.instance?.isFree ?? true;
+          const cachedPlan = await readCachedPlan(supabaseUrl, supabaseServiceRoleKey, instanceId);
+          const isFree =
+            cachedPlan && cachedPlan.fresh && cachedPlan.isFree === false
+              ? false
+              : await fetchLivePlanAndCache(supabaseUrl, supabaseServiceRoleKey, instanceId);
           if (isFree) {
             return new Response(
               JSON.stringify({ error: "LIMIT_REACHED", type: "threads" }),
@@ -210,9 +271,11 @@ export async function POST({ request }: { request: Request }) {
         );
         const rows = (await countRes.json()) as { id: string }[];
         if (Array.isArray(rows) && rows.length >= 50) {
-          const elevatedGetAppInstance = auth.elevate(appInstances.getAppInstance);
-          const instanceResponse = await elevatedGetAppInstance();
-          const isFree = instanceResponse.instance?.isFree ?? true;
+          const cachedPlan = await readCachedPlan(supabaseUrl, supabaseServiceRoleKey, instanceId);
+          const isFree =
+            cachedPlan && cachedPlan.fresh && cachedPlan.isFree === false
+              ? false
+              : await fetchLivePlanAndCache(supabaseUrl, supabaseServiceRoleKey, instanceId);
           if (isFree) {
             return new Response(
               JSON.stringify({ error: "LIMIT_REACHED", type: "replies" }),
@@ -1620,9 +1683,11 @@ export async function GET({ request }: { request: Request }) {
 
     } else if (action === "get_plan") {
       try {
-        const elevatedGetAppInstance = auth.elevate(appInstances.getAppInstance);
-        const instanceResponse = await elevatedGetAppInstance();
-        const isFree = instanceResponse.instance?.isFree ?? true;
+        const cachedPlan = await readCachedPlan(supabaseUrl, supabaseServiceRoleKey, instanceId);
+        const isFree =
+          cachedPlan && cachedPlan.fresh
+            ? cachedPlan.isFree
+            : await fetchLivePlanAndCache(supabaseUrl, supabaseServiceRoleKey, instanceId);
         return new Response(JSON.stringify({ isFree }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
