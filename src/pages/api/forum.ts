@@ -54,6 +54,7 @@ async function fetchLivePlanAndCache(
   const elevatedGetAppInstance = auth.elevate(appInstances.getAppInstance);
   const instanceResponse = await elevatedGetAppInstance();
   const isFree = instanceResponse.instance?.isFree ?? true;
+  const appVersion = (instanceResponse.instance as { appVersion?: string } | undefined)?.appVersion ?? null;
   try {
     await fetch(`${supabaseUrl}/rest/v1/site_plans?on_conflict=site_id`, {
       method: "POST",
@@ -67,6 +68,7 @@ async function fetchLivePlanAndCache(
         site_id: instanceId,
         is_free: isFree,
         checked_at: new Date().toISOString(),
+        app_version: appVersion,
       }),
     });
   } catch {
