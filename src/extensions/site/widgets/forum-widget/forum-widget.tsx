@@ -164,11 +164,11 @@ const PinIcon: FC<{ size?: number }> = ({ size = 14 }) => (
   </IconSvg>
 );
 
-const FORUM_CACHE_KEY = 'forumflow:v1:forum';
+const FORUM_CACHE_KEY = 'forumflow:v2:forum';
 const FORUM_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 type CachedForum = {
-  threads: ThreadRow[];
+  threads: Thread[];
   subjectType: string | null;
   userId: string | null;
   staffUserIds: string[];
@@ -322,6 +322,17 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   }, [detailThread?.id]);
   const repliesCacheRef = useRef<Record<string, Reply[]>>({});
   const prefetchingRef = useRef<Set<string>>(new Set());
+  const serverLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (!serverLoadedRef.current) return;
+    writeForumCache({
+      threads: threads.filter((t) => !t.pending),
+      subjectType,
+      userId,
+      staffUserIds,
+    });
+  }, [threads, subjectType, userId, staffUserIds]);
 
   const confirmWrapStyle: React.CSSProperties = {
     display: 'inline-flex',
@@ -477,7 +488,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       setSubjectType(cached.subjectType ?? null);
       setUserId(cached.userId ?? null);
       setStaffUserIds(Array.isArray(cached.staffUserIds) ? cached.staffUserIds : []);
-      setThreads(cached.threads.map(mapThreadRow));
+      setThreads(cached.threads);
       setIsLoading(false);
     }
     const editorFallbackTimer = setTimeout(() => {
@@ -487,9 +498,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       }
     }, 3000);
     const loadAll = async () => {
-      const tViewMode = performance.now();
       const viewMode = await siteWindow.viewMode();
-      console.log('[ForumFlow] viewMode ms', Math.round(performance.now() - tViewMode));
       viewModeResolved = true;
       clearTimeout(editorFallbackTimer);
       if (cancelled) return;
@@ -545,13 +554,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         setSubjectType(data.subjectType ?? null);
         setUserId(data.userId ?? null);
         setStaffUserIds(Array.isArray(data.staffUserIds) ? data.staffUserIds : []);
+        serverLoadedRef.current = true;
         setThreads(data.threads.map(mapThreadRow));
-        writeForumCache({
-          threads: data.threads,
-          subjectType: data.subjectType ?? null,
-          userId: data.userId ?? null,
-          staffUserIds: Array.isArray(data.staffUserIds) ? data.staffUserIds : [],
-        });
         setIsLoading(false);
       } catch {
         if (!cancelled && !cached) setErrorMessage('Could not load forum.');
