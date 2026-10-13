@@ -572,7 +572,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           })
           .catch(() => {});
         const response = await httpClient.fetchWithAuth(
-          `${baseApiUrl}/api/forum?action=get_threads_with_identity`
+          `${baseApiUrl}/api/forum?action=get_threads_with_identity&replies_for=${THREADS_PER_PAGE}`
         );
         if (cancelled) return;
         if (!response.ok) {
@@ -587,6 +587,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           subjectType: string | null;
           userId: string | null;
           staffUserIds?: string[];
+          repliesByThread?: Record<string, ReplyRow[]> | null;
         };
         if (cancelled) return;
         setSubjectType(data.subjectType ?? null);
@@ -594,6 +595,12 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         setStaffUserIds(Array.isArray(data.staffUserIds) ? data.staffUserIds : []);
         serverLoadedRef.current = true;
         setThreads(data.threads.map(mapThreadRow));
+        if (data.repliesByThread && typeof data.repliesByThread === 'object') {
+          for (const [tid, rows] of Object.entries(data.repliesByThread)) {
+            repliesCacheRef.current[tid] = Array.isArray(rows) ? rows.map(mapReplyRow) : [];
+          }
+          writeRepliesCache(repliesCacheRef.current);
+        }
         setIsLoading(false);
       } catch {
         if (!cancelled && !cached) setErrorMessage('Could not load forum.');

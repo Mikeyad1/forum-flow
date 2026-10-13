@@ -77,6 +77,75 @@ async function fetchLivePlanAndCache(
   return isFree;
 }
 
+async function fetchRepliesForThreads(
+  supabaseUrl: string,
+  serviceKey: string,
+  instanceId: string,
+  threadIds: string[],
+  currentUserId: string | null
+): Promise<Record<string, unknown[]>> {
+  const result: Record<string, unknown[]> = {};
+  for (const id of threadIds) {
+    result[id] = [];
+  }
+  if (threadIds.length === 0) return result;
+
+  const sbHeaders = {
+    apikey: serviceKey,
+    Authorization: `Bearer ${serviceKey}`,
+  };
+
+  const repliesRes = await fetch(
+    `${supabaseUrl}/rest/v1/replies?site_id=eq.${encodeURIComponent(instanceId)}&thread_id=in.(${threadIds.map((id) => encodeURIComponent(id)).join(",")})&select=*&order=created_at.asc`,
+    { headers: sbHeaders }
+  );
+  if (!repliesRes.ok) {
+    throw new Error("Failed to load replies");
+  }
+
+  const rowsRaw = (await repliesRes.json()) as ({ id: string; thread_id: string } & Record<string, unknown>)[];
+  const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+
+  const replyIds = rows.map((r) => String(r.id));
+  const idChunks: string[][] = [];
+  for (let i = 0; i < replyIds.length; i += 100) {
+    idChunks.push(replyIds.slice(i, i + 100));
+  }
+
+  const likeParts = await Promise.all(
+    idChunks.map((chunk) =>
+      fetch(
+        `${supabaseUrl}/rest/v1/reply_likes?site_id=eq.${encodeURIComponent(instanceId)}&reply_id=in.(${chunk.map((id) => encodeURIComponent(id)).join(",")})&select=reply_id,user_id`,
+        { headers: sbHeaders }
+      )
+        .then((r) => (r.ok ? (r.json() as Promise<{ reply_id: string; user_id: string }[]>) : []))
+        .catch(() => [] as { reply_id: string; user_id: string }[])
+    )
+  );
+
+  const likeCounts: Record<string, number> = {};
+  const likedByMeSet = new Set<string>();
+  for (const part of likeParts) {
+    if (!Array.isArray(part)) continue;
+    for (const like of part) {
+      const rid = String(like.reply_id);
+      likeCounts[rid] = (likeCounts[rid] ?? 0) + 1;
+      if (currentUserId && like.user_id === currentUserId) {
+        likedByMeSet.add(rid);
+      }
+    }
+  }
+
+  for (const row of rows) {
+    const bucket = result[String(row.thread_id)];
+    if (!bucket) continue;
+    const rid = String(row.id);
+    bucket.push({ ...row, likeCount: likeCounts[rid] ?? 0, likedByMe: likedByMeSet.has(rid) });
+  }
+
+  return result;
+}
+
 export async function POST({ request }: { request: Request }) {
   try {
     const body = (await request.json()) as CreateThreadBody;
@@ -968,12 +1037,33 @@ export async function GET({ request }: { request: Request }) {
         });
       }
 
+      let repliesByThread: Record<string, unknown[]> | null = null;
+      const perPageParam = Number(url.searchParams.get("replies_for") ?? "0");
+      if (Number.isFinite(perPageParam) && perPageParam > 0 && Array.isArray(threads)) {
+        const firstIds = (threads as Record<string, unknown>[])
+          .slice(0, Math.min(Math.floor(perPageParam), 50))
+          .filter((t) => Number(t.reply_count ?? 0) > 0)
+          .map((t) => String(t.id));
+        try {
+          repliesByThread = await fetchRepliesForThreads(
+            supabaseUrl,
+            supabaseServiceRoleKey,
+            instanceId,
+            firstIds,
+            likeCurrentUserId
+          );
+        } catch {
+          repliesByThread = null;
+        }
+      }
+
       return new Response(
         JSON.stringify({
           threads,
           subjectType: identityResult?.subjectType ?? null,
           userId: identityResult?.subjectId ?? null,
           staffUserIds,
+          repliesByThread,
         }),
         {
           status: 200,
