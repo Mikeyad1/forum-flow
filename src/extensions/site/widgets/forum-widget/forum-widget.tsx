@@ -168,7 +168,7 @@ const LIKED_COLOR = '#e11d48';
 
 const ForumWidget: FC<ForumWidgetProps> = ({
   title: forumTitle = 'Community',
-  new_thread_label: newThreadLabel = 'New Thread',
+  new_thread_label: newThreadLabel = 'New Post',
   color = '#2563EB',
   who_can_post_threads = 'everyone',
   who_can_post_replies = 'everyone',
@@ -1348,13 +1348,13 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                 onChange={() => void handleToggleNotify()}
                 style={{ accentColor: color }}
               />
-              Email me when someone replies to my threads
+              Email me when someone replies to my posts
             </label>
           )}
           <div style={{ position: 'relative', marginBottom: '10px' }}>
             <input
               type="text"
-              placeholder="Search threads…"
+              placeholder="Search posts…"
               value={searchQuery}
               onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
               style={{
@@ -1402,7 +1402,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                 color: '#4b5563',
               }}
             >
-              {threads.length === 0 ? 'No threads yet.' : 'No threads match your search.'}
+              {threads.length === 0 ? 'No posts yet.' : 'No posts match your search.'}
             </li>
           ) : (
             paginatedThreads.map((thread) => {
@@ -1531,8 +1531,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                       ) : (
                         <button
                           type="button"
-                          title="Delete thread"
-                          aria-label="Delete thread"
+                          title="Delete post"
+                          aria-label="Delete post"
                           onClick={(e) => {
                             e.stopPropagation();
                             setConfirmDeleteId(thread.id);

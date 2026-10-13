@@ -5,7 +5,7 @@ import { createClient } from '@wix/sdk';
 type PostingAudience = 'members_only' | 'everyone';
 
 const DEFAULT_TITLE = 'Community';
-const DEFAULT_NEW_THREAD_LABEL = 'New Thread';
+const DEFAULT_NEW_THREAD_LABEL = 'New Post';
 const DEFAULT_COLOR = '#2563EB';
 const DEFAULT_THREADS_AUDIENCE: PostingAudience = 'everyone';
 const DEFAULT_REPLIES_AUDIENCE: PostingAudience = 'everyone';
@@ -181,7 +181,7 @@ const SettingsPanel: FC = () => {
       </label>
 
       <label style={LABEL_STYLE}>
-        New thread button label
+        New post button label
         <input type="text" value={newThreadLabel} onChange={updateNewThreadLabel} style={INPUT_STYLE} />
       </label>
 
@@ -229,7 +229,7 @@ const SettingsPanel: FC = () => {
           checked={replyNotifications}
           onChange={updateReplyNotifications}
         />
-        Let members get email notifications for replies to their threads (Pro)
+        Let members get email notifications for replies to their posts (Pro)
       </label>
     </section>
   );
