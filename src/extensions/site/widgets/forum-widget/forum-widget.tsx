@@ -1956,5 +1956,4 @@ const customElement = reactToWebComponent(
     props: ['title', 'new_thread_label', 'color', 'who_can_post_threads', 'who_can_post_replies', 'members_can_delete', 'threads_per_page', 'reply_notifications'],
   }
 );
-customElements.define('forum-widget', customElement);
 export default customElement;
