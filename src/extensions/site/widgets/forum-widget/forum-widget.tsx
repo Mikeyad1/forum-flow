@@ -314,35 +314,6 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     return subjectType === 'MEMBER' && !!userId && ownerUserId === userId;
   };
 
-  const fetchLikesBulk = async (
-    action: 'get_likes_bulk' | 'get_reply_likes_bulk',
-    ids: string[],
-  ): Promise<Record<string, { likeCount: number; likedByMe: boolean }>> => {
-    const chunks: string[][] = [];
-    for (let i = 0; i < ids.length; i += 100) {
-      chunks.push(ids.slice(i, i + 100));
-    }
-    const parts = await Promise.all(
-      chunks.map((chunk) =>
-        httpClient
-          .fetchWithAuth(
-            `${baseApiUrl}/api/forum?action=${action}&ids=${encodeURIComponent(chunk.join(','))}`
-          )
-          .then((r) =>
-            r.ok
-              ? (r.json() as Promise<Record<string, { likeCount: number; likedByMe: boolean }>>)
-              : {}
-          )
-          .catch(() => ({}))
-      )
-    );
-    const merged: Record<string, { likeCount: number; likedByMe: boolean }> = {};
-    for (const part of parts) {
-      Object.assign(merged, part);
-    }
-    return merged;
-  };
-
   const mapReplyRow = (row: ReplyRow): Reply => ({
     id: row.id,
     author: row.user_name ?? row.author_name ?? 'Unknown author',
@@ -370,55 +341,6 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       return null;
     }
   };
-
-  const loadThreads = useCallback(async () => {
-    setIsLoading(true);
-    setErrorMessage(null);
-
-    try {
-      console.log('[ForumFlow] loadThreads: about to call fetchWithAuth');
-      const response = await httpClient.fetchWithAuth(
-        `${baseApiUrl}/api/forum?action=get_threads`
-      );
-      console.log('[ForumFlow] loadThreads: response received, status:', response.status);
-
-      if (!response.ok) {
-        setErrorMessage(
-          response.status === 401
-            ? 'You need to log in to view the forum.'
-            : 'Could not load threads.',
-        );
-        setThreads([]);
-        return;
-      }
-
-      const data = (await response.json()) as ThreadRow[];
-
-      if (!Array.isArray(data)) {
-        setErrorMessage('Could not load threads.');
-        setThreads([]);
-        return;
-      }
-
-      setThreads(
-        data.map((thread: ThreadRow) => ({
-          id: thread.id,
-          title: thread.title ?? 'Untitled thread',
-          author: thread.user_name ?? thread.author_name ?? 'Unknown author',
-          replies: thread.reply_count ?? 0,
-          timestamp: formatTimestamp(thread.created_at),
-          body: thread.body ?? '',
-          user_id: thread.user_id ?? null,
-          is_pinned: thread.is_pinned ?? false,
-          likeCount: 0,
-          likedByMe: false,
-          edited: !!thread.edited_at,
-        }))
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
 
   const loadReplies = useCallback(async (threadId: string) => {
     const hasCache = !!repliesCacheRef.current[threadId];
