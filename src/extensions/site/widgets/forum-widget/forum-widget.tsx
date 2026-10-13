@@ -481,10 +481,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     return t.title.toLowerCase().includes(q) || t.body.toLowerCase().includes(q) || replyMatchIds.has(t.id);
   });
   const totalPages = Math.ceil(filteredThreads.length / THREADS_PER_PAGE);
-  const paginatedThreads = filteredThreads.slice(
-    (currentPage - 1) * THREADS_PER_PAGE,
-    currentPage * THREADS_PER_PAGE
-  );
+  const paginatedThreads = filteredThreads.slice(0, currentPage * THREADS_PER_PAGE);
 
   const identity = { subjectType, userId };
 
@@ -2219,46 +2216,28 @@ const ForumWidget: FC<ForumWidgetProps> = ({
             })
           )}
         </ul>
-        {totalPages > 1 && (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginTop: '12px' }}>
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              style={{
-                border: '1px solid #d1d5db',
-                borderRadius: '8px',
-                backgroundColor: '#ffffff',
-                color: currentPage === 1 ? '#9ca3af' : '#374151',
-                fontSize: '14px',
-                fontWeight: 600,
-                padding: '6px 12px',
-                cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
-              }}
-            >
-              ←
-            </button>
-            <span style={{ fontSize: '13px', color: '#6b7280' }}>
-              {currentPage} / {totalPages}
-            </span>
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages}
-              style={{
-                border: '1px solid #d1d5db',
-                borderRadius: '8px',
-                backgroundColor: '#ffffff',
-                color: currentPage === totalPages ? '#9ca3af' : '#374151',
-                fontSize: '14px',
-                fontWeight: 600,
-                padding: '6px 12px',
-                cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
-              }}
-            >
-              →
-            </button>
-          </div>
+        {currentPage < totalPages && (
+          <button
+            type="button"
+            onClick={() => setCurrentPage((p) => p + 1)}
+            style={{
+              display: 'block',
+              width: '100%',
+              marginTop: '12px',
+              border: 'none',
+              borderRadius: '12px',
+              backgroundColor: '#ffffff',
+              color: '#111827',
+              fontSize: '14px',
+              fontWeight: 600,
+              padding: '12px',
+              minHeight: '44px',
+              cursor: 'pointer',
+              boxShadow: '0 1px 2px rgba(20, 24, 22, 0.06)',
+            }}
+          >
+            Load more
+          </button>
         )}
         </>
       )}
