@@ -4,6 +4,7 @@ import {
   Card,
   Loader,
   Page,
+  SectionHelper,
   Table,
   TableToolbar,
   Text,
@@ -345,6 +346,11 @@ const DashboardPage: FC = () => {
           subtitle="Review and remove forum threads"
         />
         <Page.Content>
+          <div style={{ marginBottom: '16px' }}>
+            <SectionHelper appearance="standard">
+              Forum missing from your site? In the Editor, click Add (+) → App Widgets → ForumFlow, then drag it where you want it.
+            </SectionHelper>
+          </div>
           {isPlanLoading ? (
             <Card>
               <div style={{ display: 'flex', justifyContent: 'center', padding: '48px' }}>
