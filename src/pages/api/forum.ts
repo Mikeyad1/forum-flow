@@ -369,7 +369,7 @@ export async function POST({ request }: { request: Request }) {
           const threadInfo = Array.isArray(threadInfoRows) && threadInfoRows.length > 0 ? threadInfoRows[0] : null;
           const authorId = threadInfo?.user_id ?? null;
 
-          if (!threadInfo || !authorId || authorId === "system" || threadInfo.author_type !== "MEMBER" || authorId === userId) {
+          if (!threadInfo || !authorId || authorId === "system" || (threadInfo.author_type != null && threadInfo.author_type !== "MEMBER") || authorId === userId) {
             console.log("[ForumFlow] notify: skipped (no eligible author)");
           } else {
             const optoutRes = await fetch(
