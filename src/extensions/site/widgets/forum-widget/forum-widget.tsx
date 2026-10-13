@@ -225,7 +225,6 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const membersCanDelete = parseBooleanProp(members_can_delete, true);
   const replyNotificationsOn = parseBooleanProp(reply_notifications, true);
   const baseApiUrl = new URL(import.meta.url).origin;
-  console.log('[ForumFlow] ForumWidget mounted');
   const [threads, setThreads] = useState<Thread[]>([]);
   const [isEditorMode, setIsEditorMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -467,7 +466,9 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       }
     }, 3000);
     const loadAll = async () => {
+      const tViewMode = performance.now();
       const viewMode = await siteWindow.viewMode();
+      console.log('[ForumFlow] viewMode ms', Math.round(performance.now() - tViewMode));
       viewModeResolved = true;
       clearTimeout(editorFallbackTimer);
       if (cancelled) return;

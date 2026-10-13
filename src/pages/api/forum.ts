@@ -801,7 +801,9 @@ export async function GET({ request }: { request: Request }) {
     const url = new URL(request.url);
     const action = url.searchParams.get("action");
 
+    const tStart = Date.now();
     const tokenInfo = await auth.getTokenInfo();
+    const tAuthMs = Date.now() - tStart;
     const instanceId = tokenInfo.instanceId;
 
     if (!instanceId) {
@@ -979,7 +981,14 @@ export async function GET({ request }: { request: Request }) {
           userId: identityResult?.subjectId ?? null,
           staffUserIds,
         }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "Server-Timing": `auth;dur=${tAuthMs}, rest;dur=${Date.now() - tStart - tAuthMs}, total;dur=${Date.now() - tStart}`,
+            "Timing-Allow-Origin": "*",
+          },
+        }
       );
 
     } else if (action === "get_threads") {
