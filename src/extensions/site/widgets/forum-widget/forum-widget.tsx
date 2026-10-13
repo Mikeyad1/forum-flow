@@ -37,6 +37,7 @@ type ThreadRow = {
 };
 
 type Reply = {
+  createdAt?: string | null;
   id: string;
   author: string;
   body: string;
@@ -88,18 +89,9 @@ const parseBooleanProp = (value: boolean | string | undefined, defaultValue: boo
 };
 
 const visitorSignUpNudge = (
-  <div
-    style={{
-      padding: '8px 12px',
-      marginBottom: '12px',
-      backgroundColor: '#f5f5f5',
-      borderRadius: '6px',
-      fontSize: '13px',
-      color: '#555',
-    }}
-  >
-    💬 Posting as a guest. Sign in or create an account on this site to post as a member.
-  </div>
+  <p style={{ margin: '0 0 4px', fontSize: '13px', color: '#6b7280' }}>
+    Posting as a guest. Sign in on this site to post as a member.
+  </p>
 );
 
 const formatTimestamp = (rawTimestamp: string | null): string => {
@@ -527,6 +519,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     author: row.user_name ?? row.author_name ?? 'Unknown author',
     body: row.body ?? '',
     timestamp: formatTimestamp(row.created_at),
+    createdAt: row.created_at ?? null,
     user_id: row.user_id ?? null,
     likeCount: row.likeCount ?? 0,
     likedByMe: row.likedByMe ?? false,
@@ -1230,6 +1223,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       author: subjectType === 'VISITOR' ? (visitorName.trim() || 'Guest') : 'You',
       body: trimmedReply,
       timestamp: 'Just now',
+      createdAt: new Date().toISOString(),
       user_id: userId,
       likeCount: 0,
       likedByMe: false,
@@ -1298,6 +1292,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                 author: created.user_name ?? created.author_name ?? tempReply.author,
                 body: created.body ?? trimmedReply,
                 timestamp: formatTimestamp(created.created_at),
+                createdAt: created.created_at ?? null,
                 user_id: created.user_id ?? null,
                 likeCount: 0,
                 likedByMe: false,
@@ -1929,7 +1924,31 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                               </li>
                             ) : (
                               replies.map((reply) => (
-                                <li key={reply.id} style={{ display: 'grid', gap: '4px', justifyItems: 'start' }}>
+                                <li key={reply.id} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                                  {(() => {
+                                    const av = avatarFor(reply.author);
+                                    return (
+                                      <span
+                                        aria-hidden="true"
+                                        style={{
+                                          width: '30px',
+                                          height: '30px',
+                                          borderRadius: '50%',
+                                          backgroundColor: av.bg,
+                                          color: av.fg,
+                                          fontSize: '11px',
+                                          fontWeight: 700,
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          flexShrink: 0,
+                                        }}
+                                      >
+                                        {av.initials}
+                                      </span>
+                                    );
+                                  })()}
+                                  <div style={{ display: 'grid', gap: '4px', justifyItems: 'start', flex: 1, minWidth: 0 }}>
                                   {editingReplyId === reply.id ? (
                                     <div style={{ display: 'grid', gap: '8px', width: '100%' }}>
                                       <textarea
@@ -1979,20 +1998,15 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                                       </div>
                                     </div>
                                   ) : (
-                                    <div
-                                      style={{
-                                        backgroundColor: '#f3f4f6',
-                                        borderRadius: '14px',
-                                        padding: '8px 12px',
-                                        maxWidth: '100%',
-                                        boxSizing: 'border-box',
-                                        wordBreak: 'break-word',
-                                      }}
-                                    >
-                                      <p style={{ margin: '0 0 2px', fontSize: '13px', fontWeight: 600, color: '#111827' }}>
-                                        {reply.author}{isStaff(reply.user_id) ? staffBadge : null}
+                                    <div style={{ maxWidth: '100%', wordBreak: 'break-word' }}>
+                                      <p style={{ margin: '0 0 2px', fontSize: '14px', color: '#111827' }}>
+                                        <span style={{ fontWeight: 600 }}>{reply.author}</span>
+                                        {isStaff(reply.user_id) ? staffBadge : null}
+                                        <span style={{ color: '#6b7280' }}>
+                                          {' · '}{formatRelative(reply.createdAt, reply.timestamp)}{reply.edited ? ' · edited' : ''}
+                                        </span>
                                       </p>
-                                      <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.45, color: '#111827', whiteSpace: 'pre-wrap' }}>
+                                      <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.55, color: '#374151', whiteSpace: 'pre-wrap' }}>
                                         {reply.body}
                                       </p>
                                     </div>
@@ -2003,12 +2017,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                                       alignItems: 'center',
                                       flexWrap: 'wrap',
                                       gap: '12px',
-                                      paddingLeft: '12px',
                                       fontSize: '12px',
                                       color: '#6b7280',
                                     }}
                                   >
-                                    <span>{reply.timestamp}{reply.edited ? ' · edited' : ''}</span>
                                     {(subjectType === 'MEMBER' || reply.likeCount > 0) ? (
                                       <button
                                         type="button"
@@ -2069,6 +2081,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                                         </button>
                                       )
                                     ) : null}
+                                  </div>
                                   </div>
                                 </li>
                               ))
