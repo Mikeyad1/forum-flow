@@ -6,6 +6,7 @@ import { window as siteWindow } from '@wix/site-window';
 import './style.css';
 
 type Thread = {
+  createdAt?: string | null;
   id: string;
   title: string;
   author: string;
@@ -164,6 +165,66 @@ const PinIcon: FC<{ size?: number }> = ({ size = 14 }) => (
   </IconSvg>
 );
 
+const CommentIcon: FC<{ size?: number }> = ({ size = 14 }) => (
+  <IconSvg size={size}>
+    <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z" />
+  </IconSvg>
+);
+
+const CHIP_STYLE: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '6px',
+  backgroundColor: '#f3f4f6',
+  borderRadius: '999px',
+  padding: '5px 10px',
+  fontSize: '13px',
+  color: '#4b5563',
+  lineHeight: 1.2,
+};
+
+const AVATAR_COLORS: [string, string][] = [
+  ['#efe9f9', '#6a4bb0'],
+  ['#e6f2ec', '#2f7a55'],
+  ['#fbeee4', '#a35a22'],
+  ['#e7f0fb', '#2b5f9e'],
+  ['#fbe9ee', '#a8325a'],
+  ['#efeee4', '#6b6420'],
+];
+
+const avatarFor = (name: string): { initials: string; bg: string; fg: string } => {
+  const clean = (name ?? '').trim();
+  const parts = clean.split(/\s+/).filter(Boolean);
+  const initials = (
+    parts.length === 0
+      ? '?'
+      : parts.length === 1
+        ? Array.from(parts[0]).slice(0, 2).join('')
+        : Array.from(parts[0])[0] + Array.from(parts[1])[0]
+  ).toUpperCase();
+  let hash = 0;
+  for (let i = 0; i < clean.length; i++) {
+    hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
+  }
+  const [bg, fg] = AVATAR_COLORS[hash % AVATAR_COLORS.length];
+  return { initials, bg, fg };
+};
+
+const formatRelative = (raw: string | null | undefined, fallback: string): string => {
+  if (!raw) return fallback;
+  const time = new Date(raw).getTime();
+  if (Number.isNaN(time)) return fallback;
+  const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
+  if (seconds < 60) return 'Just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return days === 1 ? 'Yesterday' : `${days} days ago`;
+  return new Date(time).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
 const FORUM_CACHE_KEY = 'forumflow:v2:forum';
 const FORUM_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -250,6 +311,7 @@ const mapThreadRow = (thread: ThreadRow): Thread => ({
   author: thread.user_name ?? thread.author_name ?? 'Unknown author',
   replies: thread.reply_count ?? 0,
   timestamp: formatTimestamp(thread.created_at),
+  createdAt: thread.created_at ?? null,
   body: thread.body ?? '',
   user_id: thread.user_id ?? null,
   is_pinned: thread.is_pinned ?? false,
@@ -735,6 +797,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       author: subjectType === 'VISITOR' ? (visitorName.trim() || 'Guest') : 'You',
       replies: 0,
       timestamp: 'Just now',
+      createdAt: new Date().toISOString(),
       body: submittedBody.trim(),
       user_id: userId,
       is_pinned: false,
@@ -804,6 +867,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                 author: created.user_name ?? created.author_name ?? tempThread.author,
                 replies: created.reply_count ?? 0,
                 timestamp: formatTimestamp(created.created_at),
+                createdAt: created.created_at ?? null,
                 body: created.body ?? '',
                 user_id: created.user_id ?? null,
                 is_pinned: created.is_pinned ?? false,
@@ -1306,10 +1370,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       data-who-can-post-replies={who_can_post_replies}
       className="ff-root"
       style={{
-        backgroundColor: '#ffffff',
-        border: '1px solid #e5e7eb',
-        borderRadius: '12px',
-        padding: '16px',
+        backgroundColor: '#f4f5f6',
+        border: 'none',
+        borderRadius: '16px',
+        padding: '20px',
         boxSizing: 'border-box',
         color: '#111827',
       }}
@@ -1332,7 +1396,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
             disabled={showNewThreadForm}
             style={{
               border: 'none',
-              borderRadius: '8px',
+              borderRadius: '999px',
               backgroundColor:
                 showNewThreadForm
                   ? `color-mix(in srgb, ${color} 50%, transparent)`
@@ -1340,7 +1404,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
               color: '#ffffff',
               fontSize: '14px',
               fontWeight: 600,
-              padding: '8px 12px',
+              padding: '10px 18px',
               cursor: showNewThreadForm ? 'not-allowed' : 'pointer',
             }}
           >
@@ -1518,9 +1582,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
               style={{
                 width: '100%',
                 boxSizing: 'border-box',
-                border: '1px solid #d1d5db',
-                borderRadius: '8px',
-                padding: '8px 32px 8px 10px',
+                border: '1px solid transparent',
+                borderRadius: '12px',
+                padding: '11px 34px 11px 14px',
+                backgroundColor: '#ffffff',
                 fontSize: '14px',
                 fontFamily: 'inherit',
                 color: '#111827',
@@ -1579,11 +1644,11 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                     }
                   }}
                   style={{
-                    border: isExpanded ? `1px solid ${color}` : '1px solid #e5e7eb',
-                    borderRadius: '10px',
-                    padding: '12px',
-                    backgroundColor: isExpanded ? '#ffffff' : '#f9fafb',
-                    boxShadow: isExpanded ? '0 1px 6px rgba(0, 0, 0, 0.06)' : 'none',
+                    border: isExpanded ? `1px solid ${color}` : '1px solid transparent',
+                    borderRadius: '16px',
+                    padding: '16px 18px',
+                    backgroundColor: '#ffffff',
+                    boxShadow: isExpanded ? '0 4px 14px rgba(20, 24, 22, 0.08)' : '0 1px 2px rgba(20, 24, 22, 0.06)',
                     cursor: 'pointer',
                   }}
                 >
@@ -1591,71 +1656,43 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                     style={{
                       display: 'flex',
                       justifyContent: 'space-between',
-                      alignItems: 'flex-start',
+                      alignItems: 'center',
                       gap: '8px',
+                      marginBottom: '10px',
                     }}
                   >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      {!(isExpanded && isEditingThread) ? (
-                        <>
-                          <p style={{ margin: '0 0 6px', fontSize: isExpanded ? '17px' : '15px', fontWeight: 600 }}>
-                            {thread.is_pinned ? (
-                              <span style={{ display: 'inline-flex', verticalAlign: '-2px', marginRight: '6px', color: color }}>
-                                <PinIcon />
-                              </span>
-                            ) : null}
-                            {thread.title}
-                          </p>
-                          {thread.body ? (
-                            <p
-                              style={{
-                                margin: '0 0 6px',
-                                fontSize: '14px',
-                                lineHeight: 1.5,
-                                color: '#374151',
-                                display: isExpanded ? 'block' : '-webkit-box',
-                                WebkitLineClamp: isExpanded ? 'unset' : 2,
-                                WebkitBoxOrient: 'vertical' as const,
-                                overflow: 'hidden',
-                                wordBreak: 'break-word',
-                                whiteSpace: isExpanded ? 'pre-wrap' : 'normal',
-                              }}
-                            >
-                              {thread.body}
-                            </p>
-                          ) : null}
-                        </>
-                      ) : null}
-                      <p style={{ margin: 0, fontSize: '13px', color: '#4b5563' }}>
-                        {thread.author}{isStaff(thread.user_id) ? staffBadge : null} •{' '}
-                        {thread.replies === 1 ? '1 reply' : `${thread.replies} replies`} •{' '}
-                        {thread.timestamp}{thread.edited ? ' (edited)' : ''}
-                      </p>
-                      {(subjectType === 'MEMBER' || thread.likeCount > 0) && (
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            color: thread.likedByMe ? LIKED_COLOR : '#9ca3af',
-                            cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
-                            marginTop: '4px',
-                            transition: 'transform 0.15s ease, color 0.15s ease',
-                            transform: 'scale(1)',
-                          }}
-                          onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(1.4)'; }}
-                          onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                          onClick={(e) => {
-                            if (subjectType !== 'MEMBER') return;
-                            e.stopPropagation();
-                            void handleToggleLike(thread.id);
-                          }}
-                        >
-                          <HeartIcon filled={thread.likedByMe} /> {thread.likeCount > 0 ? thread.likeCount : ''}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                      {(() => {
+                        const av = avatarFor(thread.author);
+                        return (
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '50%',
+                              backgroundColor: av.bg,
+                              color: av.fg,
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {av.initials}
+                          </span>
+                        );
+                      })()}
+                      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                        <span style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>
+                          {thread.author}{isStaff(thread.user_id) ? staffBadge : null}
                         </span>
-                      )}
+                        <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                          {formatRelative(thread.createdAt, thread.timestamp)}{thread.edited ? ' · edited' : ''}
+                        </span>
+                      </div>
                     </div>
                     {canDeleteContent(thread.user_id) ? (
                       confirmDeleteId === thread.id ? (
@@ -1702,6 +1739,69 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                         </button>
                       )
                     ) : null}
+                  </div>
+                  {!(isExpanded && isEditingThread) ? (
+                    <>
+                      <p style={{ margin: '0 0 6px', fontSize: isExpanded ? '18px' : '16px', fontWeight: 700, lineHeight: 1.3, color: '#111827' }}>
+                        {thread.is_pinned ? (
+                          <span style={{ display: 'inline-flex', verticalAlign: '-2px', marginRight: '6px', color: color }}>
+                            <PinIcon />
+                          </span>
+                        ) : null}
+                        {thread.title}
+                      </p>
+                      {thread.body ? (
+                        <p
+                          style={{
+                            margin: '0 0 10px',
+                            fontSize: '14px',
+                            lineHeight: 1.55,
+                            color: '#4b5563',
+                            display: isExpanded ? 'block' : '-webkit-box',
+                            WebkitLineClamp: isExpanded ? 'unset' : 2,
+                            WebkitBoxOrient: 'vertical' as const,
+                            overflow: 'hidden',
+                            wordBreak: 'break-word',
+                            whiteSpace: isExpanded ? 'pre-wrap' : 'normal',
+                          }}
+                        >
+                          {thread.body}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : null}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={CHIP_STYLE}>
+                      <CommentIcon />
+                      {thread.replies === 0
+                        ? 'Be the first to reply'
+                        : thread.replies === 1
+                          ? '1 reply'
+                          : `${thread.replies} replies`}
+                    </span>
+                    {(subjectType === 'MEMBER' || thread.likeCount > 0) && (
+                      <span
+                        style={{
+                          ...CHIP_STYLE,
+                          backgroundColor: thread.likedByMe ? '#fde8ee' : '#f3f4f6',
+                          color: thread.likedByMe ? LIKED_COLOR : '#4b5563',
+                          fontWeight: 600,
+                          cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
+                          transition: 'transform 0.15s ease, color 0.15s ease',
+                          transform: 'scale(1)',
+                        }}
+                        onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(1.1)'; }}
+                        onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                        onClick={(e) => {
+                          if (subjectType !== 'MEMBER') return;
+                          e.stopPropagation();
+                          void handleToggleLike(thread.id);
+                        }}
+                      >
+                        <HeartIcon filled={thread.likedByMe} size={14} />
+                        {thread.likeCount > 0 ? thread.likeCount : null}
+                      </span>
+                    )}
                   </div>
                   {isExpanded ? (
                     <div
