@@ -196,6 +196,33 @@ const writeForumCache = (data: Omit<CachedForum, 'savedAt'>): void => {
   }
 };
 
+const REPLIES_CACHE_KEY = 'forumflow:v1:replies';
+
+const readRepliesCache = (): Record<string, Reply[]> | null => {
+  try {
+    const raw = window.localStorage.getItem(REPLIES_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { replies?: Record<string, Reply[]>; savedAt?: number };
+    if (!parsed || !parsed.replies || typeof parsed.replies !== 'object') return null;
+    if (Date.now() - (parsed.savedAt ?? 0) > FORUM_CACHE_MAX_AGE_MS) return null;
+    return parsed.replies;
+  } catch {
+    return null;
+  }
+};
+
+const writeRepliesCache = (cache: Record<string, Reply[]>): void => {
+  try {
+    const trimmed: Record<string, Reply[]> = {};
+    for (const id of Object.keys(cache).slice(-50)) {
+      trimmed[id] = (cache[id] ?? []).filter((r) => !r.pending);
+    }
+    window.localStorage.setItem(REPLIES_CACHE_KEY, JSON.stringify({ replies: trimmed, savedAt: Date.now() }));
+  } catch {
+    // storage unavailable; ignore
+  }
+};
+
 const PLAN_CACHE_KEY = 'forumflow:v1:plan';
 
 const readPlanCache = (): boolean | null => {
@@ -334,6 +361,12 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     });
   }, [threads, subjectType, userId, staffUserIds]);
 
+  useEffect(() => {
+    if (!detailThread || repliesLoading || repliesError) return;
+    repliesCacheRef.current[detailThread.id] = replies.filter((r) => !r.pending);
+    writeRepliesCache(repliesCacheRef.current);
+  }, [replies, detailThread?.id, repliesLoading, repliesError]);
+
   const confirmWrapStyle: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
@@ -470,6 +503,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       }
       const fresh = result[threadId] ?? [];
       repliesCacheRef.current[threadId] = fresh;
+      writeRepliesCache(repliesCacheRef.current);
       if (expandedIdRef.current === threadId) {
         setReplies((prev) => [...fresh, ...prev.filter((r) => r.pending)]);
       }
@@ -483,6 +517,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   useEffect(() => {
     let cancelled = false;
     let viewModeResolved = false;
+    const cachedReplies = readRepliesCache();
+    if (cachedReplies) {
+      repliesCacheRef.current = { ...cachedReplies, ...repliesCacheRef.current };
+    }
     const cached = readForumCache();
     if (cached) {
       setSubjectType(cached.subjectType ?? null);
@@ -605,6 +643,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
               repliesCacheRef.current[id] = result[id];
             }
           }
+          writeRepliesCache(repliesCacheRef.current);
         })
         .finally(() => {
           need.forEach((id) => prefetchingRef.current.delete(id));
