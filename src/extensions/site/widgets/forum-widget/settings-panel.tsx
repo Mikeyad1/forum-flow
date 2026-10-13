@@ -4,7 +4,7 @@ import { createClient } from '@wix/sdk';
 
 type PostingAudience = 'members_only' | 'everyone';
 
-const DEFAULT_TITLE = 'ForumFlow';
+const DEFAULT_TITLE = 'Community';
 const DEFAULT_NEW_THREAD_LABEL = 'New Thread';
 const DEFAULT_COLOR = '#2563EB';
 const DEFAULT_THREADS_AUDIENCE: PostingAudience = 'everyone';
@@ -229,7 +229,7 @@ const SettingsPanel: FC = () => {
           checked={replyNotifications}
           onChange={updateReplyNotifications}
         />
-        Let members get email notifications for replies to their threads
+        Let members get email notifications for replies to their threads (Pro)
       </label>
     </section>
   );

@@ -347,11 +347,26 @@ export async function POST({ request }: { request: Request }) {
           pageUrl = null;
         }
 
-        if (!notifyEnabled || !resendApiKey || !pageUrl) {
+        let isProSite = false;
+        if (notifyEnabled && resendApiKey && pageUrl) {
+          try {
+            const cachedPlan = await readCachedPlan(supabaseUrl, supabaseServiceRoleKey, instanceId);
+            const siteIsFree =
+              cachedPlan && cachedPlan.fresh
+                ? cachedPlan.isFree
+                : await fetchLivePlanAndCache(supabaseUrl, supabaseServiceRoleKey, instanceId);
+            isProSite = !siteIsFree;
+          } catch {
+            isProSite = false;
+          }
+        }
+
+        if (!notifyEnabled || !resendApiKey || !pageUrl || !isProSite) {
           console.log("[ForumFlow] notify: skipped", {
             notifyEnabled,
             hasKey: !!resendApiKey,
             hasPageUrl: !!pageUrl,
+            isProSite,
           });
         } else {
           const sbHeaders = {

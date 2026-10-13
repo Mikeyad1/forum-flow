@@ -167,7 +167,7 @@ const PinIcon: FC<{ size?: number }> = ({ size = 14 }) => (
 const LIKED_COLOR = '#e11d48';
 
 const ForumWidget: FC<ForumWidgetProps> = ({
-  title: forumTitle = 'ForumFlow',
+  title: forumTitle = 'Community',
   new_thread_label: newThreadLabel = 'New Thread',
   color = '#2563EB',
   who_can_post_threads = 'everyone',
@@ -702,9 +702,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           const errData = (await response.json().catch(() => ({}))) as { error?: string };
           if (errData.error === 'LIMIT_REACHED') {
             restoreForm(
-              subjectType === 'APP'
-                ? 'You have reached the 25-thread limit on the free plan. Upgrade to Pro for unlimited threads.'
-                : 'Something went wrong. Please try again later.',
+              'This forum has reached its free plan limit. If you own this site, upgrade ForumFlow to Pro in your Wix dashboard.',
             );
             return;
           }
@@ -1137,9 +1135,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           const errData = (await response.json().catch(() => ({}))) as { error?: string };
           if (errData.error === 'LIMIT_REACHED') {
             rollback(
-              subjectType === 'APP'
-                ? 'You have reached the 50-reply limit on the free plan. Upgrade to Pro for unlimited replies.'
-                : 'Something went wrong. Please try again later.',
+              'This forum has reached its free plan limit. If you own this site, upgrade ForumFlow to Pro in your Wix dashboard.',
             );
             return;
           }
@@ -1410,7 +1406,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{errorMessage}</p>
       ) : (
         <>
-          {subjectType === 'MEMBER' && replyNotificationsOn && (
+          {subjectType === 'MEMBER' && replyNotificationsOn && isFree === false && (
             <label
               style={{
                 visibility: notifyEnabled === null ? 'hidden' : 'visible',
