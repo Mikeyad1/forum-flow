@@ -196,6 +196,27 @@ const writeForumCache = (data: Omit<CachedForum, 'savedAt'>): void => {
   }
 };
 
+const PLAN_CACHE_KEY = 'forumflow:v1:plan';
+
+const readPlanCache = (): boolean | null => {
+  try {
+    const raw = window.localStorage.getItem(PLAN_CACHE_KEY);
+    if (raw === 'free') return true;
+    if (raw === 'pro') return false;
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const writePlanCache = (isFree: boolean): void => {
+  try {
+    window.localStorage.setItem(PLAN_CACHE_KEY, isFree ? 'free' : 'pro');
+  } catch {
+    // storage unavailable; ignore
+  }
+};
+
 const mapThreadRow = (thread: ThreadRow): Thread => ({
   id: thread.id,
   title: thread.title ?? 'Untitled thread',
@@ -245,7 +266,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const [subjectType, setSubjectType] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [staffUserIds, setStaffUserIds] = useState<string[]>([]);
-  const [isFree, setIsFree] = useState<boolean | null>(null);
+  const [isFree, setIsFree] = useState<boolean | null>(() => readPlanCache());
   const [visitorName, setVisitorName] = useState('');
   const [isEditingThread, setIsEditingThread] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -486,7 +507,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           .fetchWithAuth(`${baseApiUrl}/api/forum?action=get_plan`)
           .then((r) => (r.ok ? (r.json() as Promise<{ isFree?: boolean }>) : null))
           .then((planData) => {
-            if (!cancelled) setIsFree(planData?.isFree ?? true);
+            if (cancelled) return;
+            const nextIsFree = planData?.isFree ?? true;
+            setIsFree(nextIsFree);
+            if (planData) writePlanCache(nextIsFree);
           })
           .catch(() => {
             if (!cancelled) setIsFree(true);
