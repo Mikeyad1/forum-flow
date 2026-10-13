@@ -18,7 +18,7 @@ export default extensions.customElement({
     {
       id: '353d28be-48d1-4310-a7f8-10a43b1205f1',
       name: 'ForumFlow',
-      thumbnailUrl: '{{BASE_URL}}/public/forumflow-thumbnail.png',
+      thumbnailUrl: '{{BASE_URL}}/forumflow-thumbnail.png',
     },
   ],
   tagName: 'forum-widget',
