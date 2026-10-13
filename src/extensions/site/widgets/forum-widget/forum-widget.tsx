@@ -164,6 +164,52 @@ const PinIcon: FC<{ size?: number }> = ({ size = 14 }) => (
   </IconSvg>
 );
 
+const FORUM_CACHE_KEY = 'forumflow:v1:forum';
+const FORUM_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+type CachedForum = {
+  threads: ThreadRow[];
+  subjectType: string | null;
+  userId: string | null;
+  staffUserIds: string[];
+  savedAt: number;
+};
+
+const readForumCache = (): CachedForum | null => {
+  try {
+    const raw = window.localStorage.getItem(FORUM_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedForum;
+    if (!parsed || !Array.isArray(parsed.threads)) return null;
+    if (Date.now() - (parsed.savedAt ?? 0) > FORUM_CACHE_MAX_AGE_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const writeForumCache = (data: Omit<CachedForum, 'savedAt'>): void => {
+  try {
+    window.localStorage.setItem(FORUM_CACHE_KEY, JSON.stringify({ ...data, savedAt: Date.now() }));
+  } catch {
+    // storage unavailable; ignore
+  }
+};
+
+const mapThreadRow = (thread: ThreadRow): Thread => ({
+  id: thread.id,
+  title: thread.title ?? 'Untitled thread',
+  author: thread.user_name ?? thread.author_name ?? 'Unknown author',
+  replies: thread.reply_count ?? 0,
+  timestamp: formatTimestamp(thread.created_at),
+  body: thread.body ?? '',
+  user_id: thread.user_id ?? null,
+  is_pinned: thread.is_pinned ?? false,
+  likeCount: thread.likeCount ?? 0,
+  likedByMe: thread.likedByMe ?? false,
+  edited: !!thread.edited_at,
+});
+
 const LIKED_COLOR = '#e11d48';
 
 const ForumWidget: FC<ForumWidgetProps> = ({
@@ -372,8 +418,16 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   useEffect(() => {
     let cancelled = false;
     let viewModeResolved = false;
+    const cached = readForumCache();
+    if (cached) {
+      setSubjectType(cached.subjectType ?? null);
+      setUserId(cached.userId ?? null);
+      setStaffUserIds(Array.isArray(cached.staffUserIds) ? cached.staffUserIds : []);
+      setThreads(cached.threads.map(mapThreadRow));
+      setIsLoading(false);
+    }
     const editorFallbackTimer = setTimeout(() => {
-      if (!viewModeResolved && !cancelled) {
+      if (!viewModeResolved && !cancelled && !cached) {
         setIsEditorMode(true);
         setIsLoading(false);
       }
@@ -390,7 +444,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       }
 
       setIsEditorMode(false);
-      setIsLoading(true);
+      if (!cached) setIsLoading(true);
       setErrorMessage(null);
       try {
         httpClient
@@ -416,8 +470,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         );
         if (cancelled) return;
         if (!response.ok) {
-          setErrorMessage('Could not load forum.');
-          setThreads([]);
+          if (!cached) {
+            setErrorMessage('Could not load forum.');
+            setThreads([]);
+          }
           return;
         }
         const data = (await response.json()) as {
@@ -430,24 +486,16 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         setSubjectType(data.subjectType ?? null);
         setUserId(data.userId ?? null);
         setStaffUserIds(Array.isArray(data.staffUserIds) ? data.staffUserIds : []);
-        setThreads(
-          data.threads.map((thread: ThreadRow) => ({
-            id: thread.id,
-            title: thread.title ?? 'Untitled thread',
-            author: thread.user_name ?? thread.author_name ?? 'Unknown author',
-            replies: thread.reply_count ?? 0,
-            timestamp: formatTimestamp(thread.created_at),
-            body: thread.body ?? '',
-            user_id: thread.user_id ?? null,
-          is_pinned: thread.is_pinned ?? false,
-          likeCount: thread.likeCount ?? 0,
-          likedByMe: thread.likedByMe ?? false,
-          edited: !!thread.edited_at,
-          }))
-        );
+        setThreads(data.threads.map(mapThreadRow));
+        writeForumCache({
+          threads: data.threads,
+          subjectType: data.subjectType ?? null,
+          userId: data.userId ?? null,
+          staffUserIds: Array.isArray(data.staffUserIds) ? data.staffUserIds : [],
+        });
         setIsLoading(false);
       } catch {
-        if (!cancelled) setErrorMessage('Could not load forum.');
+        if (!cancelled && !cached) setErrorMessage('Could not load forum.');
       } finally {
         if (!cancelled) setIsLoading(false);
       }
