@@ -1360,8 +1360,17 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         </div>
       ) : isEditorMode ? (
         <div style={{ padding: '32px 16px', textAlign: 'center', color: '#6b7280', fontSize: '14px', lineHeight: 1.6 }}>
-          <p style={{ margin: '0 0 6px', fontSize: '20px' }}>📋</p>
+          <div style={{ margin: '0 0 8px', display: 'flex', justifyContent: 'center' }} aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z" />
+              <path d="M8.5 10.5h7" />
+              <path d="M8.5 13.5h4.5" />
+            </svg>
+          </div>
           <p style={{ margin: 0 }}>Your forum threads will appear on your live site.</p>
+          <p style={{ margin: '10px 0 0', fontSize: '12px', color: '#9ca3af' }}>
+            Tip: drag this section anywhere on your page. Click Settings to customize the forum.
+          </p>
         </div>
       ) : isLoading ? (
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '10px' }}>
