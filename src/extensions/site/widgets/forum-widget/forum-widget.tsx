@@ -413,6 +413,17 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const repliesCacheRef = useRef<Record<string, Reply[]>>({});
   const prefetchingRef = useRef<Set<string>>(new Set());
   const serverLoadedRef = useRef(false);
+  const replyInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const focusReplyRef = useRef(false);
+
+  useEffect(() => {
+    if (!detailThread || !focusReplyRef.current) return;
+    focusReplyRef.current = false;
+    const timer = setTimeout(() => {
+      replyInputRef.current?.focus();
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [detailThread?.id]);
 
   useEffect(() => {
     if (!serverLoadedRef.current) return;
@@ -1806,14 +1817,28 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                     </>
                   ) : null}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <span style={CHIP_STYLE}>
+                    <button
+                      type="button"
+                      style={{ ...CHIP_STYLE, border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (thread.pending) return;
+                        if (isExpanded) {
+                          replyInputRef.current?.focus();
+                        } else {
+                          focusReplyRef.current = true;
+                          handleOpenThreadDetail(thread);
+                        }
+                      }}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
                       <CommentIcon />
                       {thread.replies === 0
                         ? 'Be the first to reply'
                         : thread.replies === 1
                           ? '1 reply'
                           : `${thread.replies} replies`}
-                    </span>
+                    </button>
                     {(subjectType === 'MEMBER' || thread.likeCount > 0) && (
                       <span
                         style={{
@@ -2146,6 +2171,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                           ) : null}
                           <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
                             <textarea
+                              ref={replyInputRef}
                               placeholder="Write a reply…"
                               value={replyBody}
                               onChange={(e) => setReplyBody(e.target.value)}
