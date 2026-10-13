@@ -5,7 +5,7 @@ import { createClient } from '@wix/sdk';
 type PostingAudience = 'members_only' | 'everyone';
 
 const DEFAULT_TITLE = 'Community';
-const DEFAULT_NEW_THREAD_LABEL = 'New Post';
+const DEFAULT_NEW_THREAD_LABEL = 'Start a discussion';
 const DEFAULT_COLOR = '#2563EB';
 const DEFAULT_THREADS_AUDIENCE: PostingAudience = 'everyone';
 const DEFAULT_REPLIES_AUDIENCE: PostingAudience = 'everyone';

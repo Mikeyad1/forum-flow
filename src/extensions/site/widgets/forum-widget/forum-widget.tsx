@@ -157,6 +157,13 @@ const PinIcon: FC<{ size?: number }> = ({ size = 14 }) => (
   </IconSvg>
 );
 
+const BellIcon: FC<{ size?: number }> = ({ size = 16 }) => (
+  <IconSvg size={size}>
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+  </IconSvg>
+);
+
 const CommentIcon: FC<{ size?: number }> = ({ size = 14 }) => (
   <IconSvg size={size}>
     <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z" />
@@ -317,7 +324,7 @@ const LIKED_COLOR = '#e11d48';
 
 const ForumWidget: FC<ForumWidgetProps> = ({
   title: forumTitle = 'Community',
-  new_thread_label: newThreadLabel = 'New Post',
+  new_thread_label: newThreadLabel = 'Start a discussion',
   color: colorProp = '',
   who_can_post_threads = 'everyone',
   who_can_post_replies = 'everyone',
@@ -1546,27 +1553,60 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       ) : (
         <>
           {subjectType === 'MEMBER' && replyNotificationsOn && isFree === false && (
-            <label
+            <div
               style={{
                 visibility: notifyEnabled === null ? 'hidden' : 'visible',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
-                fontSize: '13px',
-                color: '#4b5563',
+                gap: '10px',
+                backgroundColor: '#ffffff',
+                borderRadius: '12px',
+                padding: '10px 14px',
                 marginBottom: '10px',
-                cursor: notifySaving ? 'not-allowed' : 'pointer',
+                fontSize: '13px',
+                color: '#374151',
               }}
             >
-              <input
-                type="checkbox"
-                checked={notifyEnabled ?? true}
+              <span style={{ display: 'inline-flex', color: '#6b7280' }}>
+                <BellIcon />
+              </span>
+              <span style={{ flex: 1 }}>Email me when someone replies to my posts</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={notifyEnabled ?? true}
+                aria-label="Email me when someone replies to my posts"
                 disabled={notifySaving || notifyEnabled === null}
-                onChange={() => void handleToggleNotify()}
-                style={{ accentColor: color }}
-              />
-              Email me when someone replies to my posts
-            </label>
+                onClick={() => void handleToggleNotify()}
+                style={{
+                  position: 'relative',
+                  width: '36px',
+                  height: '20px',
+                  borderRadius: '999px',
+                  border: 'none',
+                  padding: 0,
+                  flexShrink: 0,
+                  backgroundColor: (notifyEnabled ?? true) ? color : '#d1d5db',
+                  cursor: notifySaving ? 'not-allowed' : 'pointer',
+                  transition: 'background-color 0.15s ease',
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    top: '2px',
+                    left: (notifyEnabled ?? true) ? '18px' : '2px',
+                    width: '16px',
+                    height: '16px',
+                    borderRadius: '50%',
+                    backgroundColor: '#ffffff',
+                    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.2)',
+                    transition: 'left 0.15s ease',
+                  }}
+                />
+              </button>
+            </div>
           )}
           <div style={{ position: 'relative', marginBottom: '10px' }}>
             <input
@@ -1999,7 +2039,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                                     </div>
                                   ) : (
                                     <div style={{ maxWidth: '100%', wordBreak: 'break-word' }}>
-                                      <p style={{ margin: '0 0 2px', fontSize: '14px', color: '#111827' }}>
+                                      <p style={{ margin: '0 0 2px', fontSize: '14px', color: '#111827', paddingRight: '90px' }}>
                                         <span style={{ fontWeight: 600 }}>{reply.author}</span>
                                         {isStaff(reply.user_id) ? staffBadge : null}
                                         <span style={{ color: '#6b7280' }}>
@@ -2013,9 +2053,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                                   )}
                                   <div
                                     style={{
-                                      display: 'flex',
+                                      display: editingReplyId === reply.id ? 'none' : 'flex',
                                       alignItems: 'center',
-                                      flexWrap: 'wrap',
                                       gap: '12px',
                                       fontSize: '12px',
                                       color: '#6b7280',
@@ -2032,6 +2071,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                                         style={{
                                           ...actionButtonStyle,
                                           color: reply.likedByMe ? LIKED_COLOR : '#6b7280',
+                                          minWidth: '34px',
+                                          justifyContent: 'flex-start',
                                           cursor: subjectType === 'MEMBER' ? 'pointer' : 'default',
                                           transition: 'transform 0.15s ease, color 0.15s ease',
                                         }}
