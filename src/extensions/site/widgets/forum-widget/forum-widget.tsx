@@ -259,6 +259,40 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const [isEditReplySaving, setIsEditReplySaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [replyMatchIds, setReplyMatchIds] = useState<Set<string>>(new Set());
+  const [replyMatchQuery, setReplyMatchQuery] = useState('');
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setReplyMatchIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      httpClient
+        .fetchWithAuth(`${baseApiUrl}/api/forum?action=search_replies&q=${encodeURIComponent(q)}`)
+        .then((r) => (r.ok ? (r.json() as Promise<{ threadIds?: string[] }>) : null))
+        .then((data) => {
+          if (!cancelled) {
+            setReplyMatchIds(new Set(Array.isArray(data?.threadIds) ? data.threadIds : []));
+            setReplyMatchQuery(q);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setReplyMatchIds(new Set());
+            setReplyMatchQuery(q);
+          }
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery, baseApiUrl]);
+  const isSearchingReplies =
+    searchQuery.trim().length >= 2 && replyMatchQuery !== searchQuery.trim();
   const [notifyEnabled, setNotifyEnabled] = useState<boolean | null>(null);
   const [notifySaving, setNotifySaving] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -306,7 +340,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       : 10;
   const filteredThreads = threads.filter((t) => {
     const q = searchQuery.toLowerCase();
-    return t.title.toLowerCase().includes(q) || t.body.toLowerCase().includes(q);
+    return t.title.toLowerCase().includes(q) || t.body.toLowerCase().includes(q) || replyMatchIds.has(t.id);
   });
   const totalPages = Math.ceil(filteredThreads.length / THREADS_PER_PAGE);
   const paginatedThreads = filteredThreads.slice(
@@ -1450,7 +1484,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                 color: '#4b5563',
               }}
             >
-              {threads.length === 0 ? 'No posts yet.' : 'No posts match your search.'}
+              {threads.length === 0 ? 'No posts yet.' : isSearchingReplies ? 'Searching…' : 'No posts match your search.'}
             </li>
           ) : (
             paginatedThreads.map((thread) => {

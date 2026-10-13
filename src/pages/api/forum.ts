@@ -1813,6 +1813,39 @@ export async function GET({ request }: { request: Request }) {
         headers: { "Content-Type": "application/json" },
       });
 
+    } else if (action === "search_replies") {
+      const rawQ = (url.searchParams.get("q") ?? "").trim().slice(0, 100);
+      const q = rawQ.replace(/[*%,()\\]/g, " ").trim();
+      if (q.length < 2) {
+        return new Response(JSON.stringify({ threadIds: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const searchRes = await fetch(
+        `${supabaseUrl}/rest/v1/replies?site_id=eq.${encodeURIComponent(instanceId)}&body=ilike.${encodeURIComponent(`*${q}*`)}&select=thread_id&limit=1000`,
+        {
+          headers: {
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          },
+        }
+      );
+      if (!searchRes.ok) {
+        return new Response(JSON.stringify({ threadIds: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const searchRows = (await searchRes.json()) as { thread_id: string }[];
+      const matchedThreadIds = Array.from(
+        new Set((Array.isArray(searchRows) ? searchRows : []).map((r) => String(r.thread_id)))
+      );
+      return new Response(JSON.stringify({ threadIds: matchedThreadIds }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
     } else if (action === "get_plan") {
       try {
         const cachedPlan = await readCachedPlan(supabaseUrl, supabaseServiceRoleKey, instanceId);
