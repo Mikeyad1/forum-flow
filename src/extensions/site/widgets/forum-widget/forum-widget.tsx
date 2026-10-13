@@ -258,12 +258,13 @@ const mapThreadRow = (thread: ThreadRow): Thread => ({
   edited: !!thread.edited_at,
 });
 
+const THEME_ACCENT = 'var(--wst-links-and-actions-color, var(--wst-color-action, #2563EB))';
 const LIKED_COLOR = '#e11d48';
 
 const ForumWidget: FC<ForumWidgetProps> = ({
   title: forumTitle = 'Community',
   new_thread_label: newThreadLabel = 'New Post',
-  color = '#2563EB',
+  color: colorProp = '',
   who_can_post_threads = 'everyone',
   who_can_post_replies = 'everyone',
   members_can_delete = true,
@@ -272,6 +273,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
 }) => {
   const membersCanDelete = parseBooleanProp(members_can_delete, true);
   const replyNotificationsOn = parseBooleanProp(reply_notifications, true);
+  const color = typeof colorProp === 'string' && colorProp.trim() ? colorProp : THEME_ACCENT;
   const baseApiUrl = new URL(import.meta.url).origin;
   const [threads, setThreads] = useState<Thread[]>([]);
   const [isEditorMode, setIsEditorMode] = useState(false);
@@ -1302,9 +1304,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     <section
       data-who-can-post-threads={who_can_post_threads}
       data-who-can-post-replies={who_can_post_replies}
+      className="ff-root"
       style={{
-        fontFamily:
-          'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
         backgroundColor: '#ffffff',
         border: '1px solid #e5e7eb',
         borderRadius: '12px',
@@ -1321,7 +1322,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           marginBottom: '14px',
         }}
       >
-        <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700 }}>{forumTitle}</h2>
+        <h2 className="ff-title">{forumTitle}</h2>
         {threadsMembersOnlyBlock ? (
           <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>Members only</p>
         ) : (
