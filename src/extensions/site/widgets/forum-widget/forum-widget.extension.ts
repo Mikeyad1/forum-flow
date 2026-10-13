@@ -11,7 +11,7 @@ export default extensions.customElement({
     defaultHeight: 360,
   },
   installation: {
-    staticContainer: "HOMEPAGE",
+    autoAdd: true,
   },
   settings: './extensions/site/widgets/forum-widget/settings-panel.tsx',
   tagName: 'forum-widget',
