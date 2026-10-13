@@ -831,18 +831,12 @@ export async function GET({ request }: { request: Request }) {
     }
 
     if (action === "get_threads_with_identity") {
-      const authHeader = request.headers.get("authorization");
+      const identityResult = {
+        subjectId: tokenInfo.subjectId ?? null,
+        subjectType: tokenInfo.subjectType ?? null,
+      };
 
-      const [identityResult, threadsResponse, staffResponse, threadLikesResponse] = await Promise.all([
-        authHeader
-          ? fetch("https://www.wixapis.com/oauth2/token-info", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ token: authHeader }),
-            })
-              .then((r) => (r.ok ? (r.json() as Promise<{ subjectId?: string; subjectType?: string }>) : null))
-              .catch(() => null)
-          : Promise.resolve(null),
+      const [threadsResponse, staffResponse, threadLikesResponse] = await Promise.all([
         fetch(
           `${supabaseUrl}/rest/v1/threads?site_id=eq.${encodeURIComponent(instanceId)}&select=*&order=is_pinned.desc,created_at.desc`,
           {
