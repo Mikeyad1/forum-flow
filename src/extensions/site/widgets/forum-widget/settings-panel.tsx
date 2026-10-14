@@ -12,6 +12,7 @@ const DEFAULT_REPLIES_AUDIENCE: PostingAudience = 'everyone';
 const DEFAULT_MEMBERS_CAN_DELETE = true;
 const DEFAULT_THREADS_PER_PAGE = '10';
 const DEFAULT_REPLY_NOTIFICATIONS = true;
+const DEFAULT_ABOUT = '';
 const THREADS_PER_PAGE_OPTIONS = ['5', '10', '15', '20', '30'];
 
 const SETTINGS_CONTAINER_STYLE: React.CSSProperties = {
@@ -75,6 +76,7 @@ const SettingsPanel: FC = () => {
   const [membersCanDelete, setMembersCanDelete] = useState(DEFAULT_MEMBERS_CAN_DELETE);
   const [threadsPerPage, setThreadsPerPage] = useState(DEFAULT_THREADS_PER_PAGE);
   const [replyNotifications, setReplyNotifications] = useState(DEFAULT_REPLY_NOTIFICATIONS);
+  const [aboutText, setAboutText] = useState(DEFAULT_ABOUT);
 
   useEffect(() => {
     let isMounted = true;
@@ -89,6 +91,7 @@ const SettingsPanel: FC = () => {
         savedMembersCanDelete,
         savedThreadsPerPage,
         savedReplyNotifications,
+        savedAbout,
       ] = await Promise.all([
         client.widget.getProp('title'),
         client.widget.getProp('new_thread_label'),
@@ -98,6 +101,7 @@ const SettingsPanel: FC = () => {
         client.widget.getProp('members_can_delete'),
         client.widget.getProp('threads_per_page'),
         client.widget.getProp('reply_notifications'),
+        client.widget.getProp('about_text'),
       ]);
 
       if (!isMounted) {
@@ -117,6 +121,7 @@ const SettingsPanel: FC = () => {
       const perPageStr = savedThreadsPerPage != null ? String(savedThreadsPerPage) : '';
       setThreadsPerPage(THREADS_PER_PAGE_OPTIONS.includes(perPageStr) ? perPageStr : DEFAULT_THREADS_PER_PAGE);
       setReplyNotifications(parseBooleanProp(savedReplyNotifications, DEFAULT_REPLY_NOTIFICATIONS));
+      setAboutText(typeof savedAbout === 'string' ? savedAbout : DEFAULT_ABOUT);
     };
 
     void loadProps();
@@ -135,6 +140,12 @@ const SettingsPanel: FC = () => {
     const nextValue = event.target.value;
     setNewThreadLabel(nextValue);
     await client.widget.setProp('new_thread_label', nextValue);
+  };
+
+  const updateAboutText = async (event: ChangeEvent<HTMLTextAreaElement>) => {
+    const nextValue = event.target.value;
+    setAboutText(nextValue);
+    await client.widget.setProp('about_text', nextValue);
   };
 
   const updateColor = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -183,6 +194,18 @@ const SettingsPanel: FC = () => {
       <label style={LABEL_STYLE}>
         New post button label
         <input type="text" value={newThreadLabel} onChange={updateNewThreadLabel} style={INPUT_STYLE} />
+      </label>
+
+      <label style={LABEL_STYLE}>
+        About this community (optional)
+        <textarea
+          value={aboutText}
+          onChange={updateAboutText}
+          rows={3}
+          maxLength={300}
+          placeholder="A short welcome shown in the forum's side panel"
+          style={{ ...INPUT_STYLE, resize: 'vertical' }}
+        />
       </label>
 
       <label style={LABEL_STYLE}>

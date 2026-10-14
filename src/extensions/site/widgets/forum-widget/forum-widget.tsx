@@ -70,6 +70,7 @@ type ForumWidgetProps = {
   members_can_delete?: boolean | string;
   threads_per_page?: number | string;
   reply_notifications?: boolean | string;
+  about_text?: string;
 };
 
 const parseBooleanProp = (value: boolean | string | undefined, defaultValue: boolean): boolean => {
@@ -331,6 +332,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   members_can_delete = true,
   threads_per_page = '10',
   reply_notifications = true,
+  about_text: aboutText = '',
 }) => {
   const membersCanDelete = parseBooleanProp(members_can_delete, true);
   const replyNotificationsOn = parseBooleanProp(reply_notifications, true);
@@ -484,6 +486,20 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const paginatedThreads = filteredThreads.slice(0, currentPage * THREADS_PER_PAGE);
 
   const identity = { subjectType, userId };
+  const totalReplies = threads.reduce((sum, t) => sum + (t.replies ?? 0), 0);
+  const statsLabel = `${threads.length} ${threads.length === 1 ? 'post' : 'posts'} · ${totalReplies} ${totalReplies === 1 ? 'reply' : 'replies'}`;
+  const listVisible = !showNewThreadForm && !isEditorMode && !isLoading && !errorMessage;
+  const staffMembers = staffUserIds
+    .map((id) => {
+      const fromThread = threads.find((t) => t.user_id === id && !t.pending);
+      if (fromThread) return { id, name: fromThread.author };
+      for (const list of Object.values(repliesCacheRef.current)) {
+        const r = (list ?? []).find((x) => x.user_id === id && !x.pending);
+        if (r) return { id, name: r.author };
+      }
+      return null;
+    })
+    .filter((m): m is { id: string; name: string } => !!m && m.name !== 'You');
 
   const isStaff = (ownerUserId: string | null): boolean =>
     !!ownerUserId && staffUserIds.includes(ownerUserId);
@@ -1374,7 +1390,81 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     lineHeight: 1,
   };
 
+  const asideContent = (
+    <aside className="ff-aside">
+      <div className="ff-aside-cta">
+        {threadsMembersOnlyBlock ? (
+          <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>Only members can start discussions.</p>
+        ) : (
+          <button
+            type="button"
+            onClick={handleOpenNewThread}
+            disabled={showNewThreadForm}
+            style={{
+              width: '100%',
+              border: 'none',
+              borderRadius: '14px',
+              backgroundColor: color,
+              color: '#ffffff',
+              fontFamily: 'inherit',
+              fontSize: '15px',
+              fontWeight: 700,
+              padding: '14px 16px',
+              minHeight: '48px',
+              cursor: 'pointer',
+            }}
+          >
+            {newThreadLabel}
+          </button>
+        )}
+      </div>
+      {aboutText.trim() ? (
+        <div className="ff-card">
+          <span className="ff-card-label">About</span>
+          <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.55, color: '#374151', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {aboutText.trim()}
+          </p>
+        </div>
+      ) : null}
+      {staffMembers.length > 0 ? (
+        <div className="ff-card">
+          <span className="ff-card-label">Our team</span>
+          {staffMembers.map((m) => {
+            const av = avatarFor(m.name);
+            return (
+              <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: '30px',
+                    height: '30px',
+                    borderRadius: '50%',
+                    backgroundColor: av.bg,
+                    color: av.fg,
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  {av.initials}
+                </span>
+                <span style={{ fontSize: '14px', fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {m.name}
+                </span>
+                {staffBadge}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </aside>
+  );
+
   return (
+    <div className="ff-shell">
     <section
       data-who-can-post-threads={who_can_post_threads}
       data-who-can-post-replies={who_can_post_replies}
@@ -1383,7 +1473,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         backgroundColor: '#f4f5f6',
         border: 'none',
         borderRadius: '16px',
-        padding: '20px max(20px, calc((100% - 760px) / 2))',
+        padding: '20px max(20px, calc((100% - 1120px) / 2))',
         boxSizing: 'border-box',
         color: '#111827',
       }}
@@ -1396,7 +1486,13 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           marginBottom: '14px',
         }}
       >
-        <h2 className="ff-title">{forumTitle}</h2>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+          <h2 className="ff-title">{forumTitle}</h2>
+          {listVisible && threads.length > 0 ? (
+            <span style={{ fontSize: '13px', color: '#6b7280' }}>{statsLabel}</span>
+          ) : null}
+        </div>
+        <div className={listVisible ? 'ff-header-cta' : undefined}>
         {threadsMembersOnlyBlock ? (
           <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>Members only</p>
         ) : (
@@ -1421,6 +1517,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
             {newThreadLabel}
           </button>
         )}
+        </div>
       </header>
 
       {showNewThreadForm ? (
@@ -1559,7 +1656,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       ) : errorMessage ? (
         <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{errorMessage}</p>
       ) : (
-        <>
+        <div className="ff-layout">
+        <div className="ff-main">
           {subjectType === 'MEMBER' && replyNotificationsOn && isFree === false && (
             <div
               style={{
@@ -2239,7 +2337,9 @@ const ForumWidget: FC<ForumWidgetProps> = ({
             Load more
           </button>
         )}
-        </>
+        </div>
+        {asideContent}
+        </div>
       )}
       {isFree === true && (
         <div style={{
@@ -2262,6 +2362,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         </div>
       )}
     </section>
+    </div>
   );
 };
 
@@ -2270,7 +2371,7 @@ const customElement = reactToWebComponent(
   React,
   ReactDOM as any,
   {
-    props: ['title', 'new_thread_label', 'color', 'who_can_post_threads', 'who_can_post_replies', 'members_can_delete', 'threads_per_page', 'reply_notifications'],
+    props: ['title', 'new_thread_label', 'color', 'who_can_post_threads', 'who_can_post_replies', 'members_can_delete', 'threads_per_page', 'reply_notifications', 'about_text'],
   }
 );
 export default customElement;

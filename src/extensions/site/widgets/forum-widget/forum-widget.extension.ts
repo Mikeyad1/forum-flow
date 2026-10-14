@@ -4,7 +4,7 @@ export default extensions.customElement({
   id: '1ed31ae0-008b-4d7d-8d06-a2c9af1f1b7f',
   name: 'ForumFlow Widget',
   width: {
-    defaultWidth: 520,
+    defaultWidth: 880,
     allowStretch: true,
     stretchByDefault: true,
   },
