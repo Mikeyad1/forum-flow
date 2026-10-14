@@ -71,6 +71,7 @@ type ForumWidgetProps = {
   threads_per_page?: number | string;
   reply_notifications?: boolean | string;
   about_text?: string;
+  layout?: string;
 };
 
 const parseBooleanProp = (value: boolean | string | undefined, defaultValue: boolean): boolean => {
@@ -333,8 +334,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   threads_per_page = '10',
   reply_notifications = true,
   about_text: aboutText = '',
+  layout: layoutProp = 'full',
 }) => {
   const membersCanDelete = parseBooleanProp(members_can_delete, true);
+  const isHighlights = layoutProp === 'highlights';
   const replyNotificationsOn = parseBooleanProp(reply_notifications, true);
   const color = typeof colorProp === 'string' && colorProp.trim() ? colorProp : THEME_ACCENT;
   const baseApiUrl = new URL(import.meta.url).origin;
@@ -408,6 +411,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const [notifyEnabled, setNotifyEnabled] = useState<boolean | null>(null);
   const [notifySaving, setNotifySaving] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [highlightsExpanded, setHighlightsExpanded] = useState(false);
+  const rootRef = useRef<HTMLElement | null>(null);
   const expandedIdRef = useRef<string | null>(null);
   useEffect(() => {
     expandedIdRef.current = detailThread?.id ?? null;
@@ -1391,6 +1396,78 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     lineHeight: 1,
   };
 
+  const highlightThreads = threads.filter((t) => !t.pending).slice(0, 3);
+  const showHighlights = isHighlights && !highlightsExpanded && highlightThreads.length > 0;
+
+  const openFromHighlight = (thread: Thread) => {
+    setHighlightsExpanded(true);
+    handleOpenThreadDetail(thread);
+  };
+
+  const collapseHighlights = () => {
+    handleBackToList();
+    setCurrentPage(1);
+    setHighlightsExpanded(false);
+    setTimeout(() => {
+      const el = rootRef.current;
+      if (el && el.getBoundingClientRect().top < 0) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 0);
+  };
+
+  const highlightsContent = (
+    <div className="ff-fade-in">
+      <div className="ff-hl-track">
+        {highlightThreads.map((thread) => {
+          const av = avatarFor(thread.author);
+          return (
+            <button key={thread.id} type="button" className="ff-hl-card" onClick={() => openFromHighlight(thread)}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    backgroundColor: av.bg,
+                    color: av.fg,
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  {av.initials}
+                </span>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {thread.author}
+                </span>
+                <span style={{ fontSize: '12px', color: '#6b7280', flexShrink: 0 }}>
+                  · {formatRelative(thread.createdAt, thread.timestamp)}
+                </span>
+              </span>
+              <span className="ff-hl-title">{thread.title}</span>
+              <span style={{ ...CHIP_STYLE, alignSelf: 'flex-start' }}>
+                <CommentIcon />
+                {thread.replies === 0
+                  ? 'Be the first to reply'
+                  : thread.replies === 1
+                    ? '1 reply'
+                    : `${thread.replies} replies`}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <button type="button" className="ff-hl-seeall" onClick={() => setHighlightsExpanded(true)}>
+        See all discussions
+      </button>
+    </div>
+  );
+
   const asideContent = (
     <aside className="ff-aside">
       <div className="ff-aside-cta">
@@ -1469,12 +1546,13 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     <section
       data-who-can-post-threads={who_can_post_threads}
       data-who-can-post-replies={who_can_post_replies}
+      ref={rootRef}
       className="ff-root"
       style={{
         backgroundColor: '#f4f5f6',
         border: 'none',
         borderRadius: '16px',
-        padding: `20px max(20px, calc((100% - ${hasAside ? 1120 : 760}px) / 2))`,
+        padding: `20px max(20px, calc((100% - ${hasAside || showHighlights ? 1120 : 760}px) / 2))`,
         boxSizing: 'border-box',
         color: '#111827',
       }}
@@ -1484,16 +1562,51 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px',
           marginBottom: '14px',
         }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+          {isHighlights ? (
+            <span style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: color }}>
+              From the community
+            </span>
+          ) : null}
           <h2 className="ff-title">{forumTitle}</h2>
           {listVisible && threads.length > 0 ? (
             <span style={{ fontSize: '13px', color: '#6b7280' }}>{statsLabel}</span>
           ) : null}
         </div>
-        <div className={listVisible && hasAside ? 'ff-header-cta' : undefined}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        {isHighlights && highlightsExpanded && listVisible ? (
+          <button
+            type="button"
+            onClick={collapseHighlights}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              border: 'none',
+              borderRadius: '999px',
+              backgroundColor: '#ffffff',
+              color: '#111827',
+              fontFamily: 'inherit',
+              fontSize: '14px',
+              fontWeight: 600,
+              padding: '10px 16px',
+              minHeight: '44px',
+              cursor: 'pointer',
+              boxShadow: '0 1px 2px rgba(20, 24, 22, 0.06)',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m18 15-6-6-6 6" />
+            </svg>
+            Show less
+          </button>
+        ) : null}
+        <div className={listVisible && hasAside && !showHighlights ? 'ff-header-cta' : undefined}>
         {threadsMembersOnlyBlock ? (
           <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>Members only</p>
         ) : (
@@ -1518,6 +1631,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
             {newThreadLabel}
           </button>
         )}
+        </div>
         </div>
       </header>
 
@@ -1615,10 +1729,15 @@ const ForumWidget: FC<ForumWidgetProps> = ({
               <path d="M8.5 13.5h4.5" />
             </svg>
           </div>
-          <p style={{ margin: 0 }}>Your forum threads will appear on your live site.</p>
+          <p style={{ margin: 0 }}>Your forum posts will appear on your live site.</p>
           <p style={{ margin: '10px 0 0', fontSize: '12px', color: '#9ca3af' }}>
-            Tip: drag this section anywhere on your page. Click Settings to customize the forum.
+            Tip: to move the forum, right-click its section and choose Move Up or Move Down. Click Settings to customize it.
           </p>
+          {!isHighlights ? (
+            <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#6b7280' }}>
+              On your home page? Try the <strong>Highlights</strong> layout in Settings.
+            </p>
+          ) : null}
         </div>
       ) : isLoading ? (
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '10px' }}>
@@ -1656,8 +1775,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         </ul>
       ) : errorMessage ? (
         <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{errorMessage}</p>
+      ) : showHighlights ? (
+        highlightsContent
       ) : (
-        <div className={hasAside ? 'ff-layout' : 'ff-layout ff-layout--single'}>
+        <div className={`${hasAside ? 'ff-layout' : 'ff-layout ff-layout--single'}${isHighlights ? ' ff-fade-in' : ''}`}>
         <div className="ff-main">
           {subjectType === 'MEMBER' && replyNotificationsOn && isFree === false && (
             <div
@@ -2372,7 +2493,7 @@ const customElement = reactToWebComponent(
   React,
   ReactDOM as any,
   {
-    props: ['title', 'new_thread_label', 'color', 'who_can_post_threads', 'who_can_post_replies', 'members_can_delete', 'threads_per_page', 'reply_notifications', 'about_text'],
+    props: ['title', 'new_thread_label', 'color', 'who_can_post_threads', 'who_can_post_replies', 'members_can_delete', 'threads_per_page', 'reply_notifications', 'about_text', 'layout'],
   }
 );
 export default customElement;

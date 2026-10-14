@@ -13,6 +13,7 @@ const DEFAULT_MEMBERS_CAN_DELETE = true;
 const DEFAULT_THREADS_PER_PAGE = '10';
 const DEFAULT_REPLY_NOTIFICATIONS = true;
 const DEFAULT_ABOUT = '';
+const DEFAULT_LAYOUT = 'full';
 const THREADS_PER_PAGE_OPTIONS = ['5', '10', '15', '20', '30'];
 
 const SETTINGS_CONTAINER_STYLE: React.CSSProperties = {
@@ -77,6 +78,7 @@ const SettingsPanel: FC = () => {
   const [threadsPerPage, setThreadsPerPage] = useState(DEFAULT_THREADS_PER_PAGE);
   const [replyNotifications, setReplyNotifications] = useState(DEFAULT_REPLY_NOTIFICATIONS);
   const [aboutText, setAboutText] = useState(DEFAULT_ABOUT);
+  const [layout, setLayout] = useState(DEFAULT_LAYOUT);
 
   useEffect(() => {
     let isMounted = true;
@@ -92,6 +94,7 @@ const SettingsPanel: FC = () => {
         savedThreadsPerPage,
         savedReplyNotifications,
         savedAbout,
+        savedLayout,
       ] = await Promise.all([
         client.widget.getProp('title'),
         client.widget.getProp('new_thread_label'),
@@ -102,6 +105,7 @@ const SettingsPanel: FC = () => {
         client.widget.getProp('threads_per_page'),
         client.widget.getProp('reply_notifications'),
         client.widget.getProp('about_text'),
+        client.widget.getProp('layout'),
       ]);
 
       if (!isMounted) {
@@ -122,6 +126,7 @@ const SettingsPanel: FC = () => {
       setThreadsPerPage(THREADS_PER_PAGE_OPTIONS.includes(perPageStr) ? perPageStr : DEFAULT_THREADS_PER_PAGE);
       setReplyNotifications(parseBooleanProp(savedReplyNotifications, DEFAULT_REPLY_NOTIFICATIONS));
       setAboutText(typeof savedAbout === 'string' ? savedAbout : DEFAULT_ABOUT);
+      setLayout(savedLayout === 'highlights' ? 'highlights' : DEFAULT_LAYOUT);
     };
 
     void loadProps();
@@ -146,6 +151,11 @@ const SettingsPanel: FC = () => {
     const nextValue = event.target.value;
     setAboutText(nextValue);
     await client.widget.setProp('about_text', nextValue);
+  };
+
+  const selectLayout = async (nextValue: 'full' | 'highlights') => {
+    setLayout(nextValue);
+    await client.widget.setProp('layout', nextValue);
   };
 
   const updateColor = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -207,6 +217,68 @@ const SettingsPanel: FC = () => {
           style={{ ...INPUT_STYLE, resize: 'vertical' }}
         />
       </label>
+
+      <div style={LABEL_STYLE}>
+        Layout
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          {([
+            {
+              value: 'full' as const,
+              label: 'Full forum',
+              hint: 'All posts, search and side panel',
+              preview: (
+                <svg viewBox="0 0 120 72" width="100%" aria-hidden="true" style={{ display: 'block', borderRadius: '6px' }}>
+                  <rect width="120" height="72" fill="#f4f5f6" />
+                  <rect x="10" y="8" width="40" height="6" rx="3" fill="#9ca3af" />
+                  <rect x="10" y="20" width="100" height="13" rx="3" fill="#ffffff" />
+                  <rect x="10" y="37" width="100" height="13" rx="3" fill="#ffffff" />
+                  <rect x="10" y="54" width="100" height="13" rx="3" fill="#ffffff" />
+                </svg>
+              ),
+            },
+            {
+              value: 'highlights' as const,
+              label: 'Highlights',
+              hint: 'Latest 3 posts, great for the home page',
+              preview: (
+                <svg viewBox="0 0 120 72" width="100%" aria-hidden="true" style={{ display: 'block', borderRadius: '6px' }}>
+                  <rect width="120" height="72" fill="#f4f5f6" />
+                  <rect x="10" y="8" width="40" height="6" rx="3" fill="#9ca3af" />
+                  <rect x="10" y="20" width="31" height="30" rx="3" fill="#ffffff" />
+                  <rect x="45" y="20" width="30" height="30" rx="3" fill="#ffffff" />
+                  <rect x="79" y="20" width="31" height="30" rx="3" fill="#ffffff" />
+                  <rect x="10" y="55" width="100" height="9" rx="3" fill="#ffffff" />
+                </svg>
+              ),
+            },
+          ]).map((opt) => {
+            const selected = layout === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => void selectLayout(opt.value)}
+                style={{
+                  display: 'grid',
+                  gap: '6px',
+                  textAlign: 'left',
+                  background: '#ffffff',
+                  border: selected ? '2px solid #2563EB' : '1px solid #d1d5db',
+                  borderRadius: '10px',
+                  padding: selected ? '7px' : '8px',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {opt.preview}
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#111827' }}>{opt.label}</span>
+                <span style={{ fontSize: '11px', fontWeight: 400, color: '#6b7280', lineHeight: 1.35 }}>{opt.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       <label style={LABEL_STYLE}>
         Primary color
