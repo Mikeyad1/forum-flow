@@ -26,6 +26,7 @@
 .ff-shell {
   container-type: inline-size;
   container-name: ff;
+  padding-bottom: 40px;
 }
 .ff-layout {
   display: grid;
