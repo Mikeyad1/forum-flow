@@ -249,7 +249,7 @@ export async function POST({ request }: { request: Request }) {
       // Plan limit check: count first, check the plan only when the free limit is reached
       try {
         const countRes = await fetch(
-          `${supabaseUrl}/rest/v1/threads?site_id=eq.${encodeURIComponent(instanceId)}&select=id`,
+          `${supabaseUrl}/rest/v1/threads?site_id=eq.${encodeURIComponent(instanceId)}&user_id=neq.system&select=id`,
           {
             headers: {
               apikey: supabaseServiceRoleKey,
@@ -897,6 +897,25 @@ export async function GET({ request }: { request: Request }) {
         status: 403,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    if (action && action.startsWith("admin_")) {
+      let adminIsFree = false;
+      try {
+        const cachedPlan = await readCachedPlan(supabaseUrl, supabaseServiceRoleKey, instanceId);
+        adminIsFree =
+          cachedPlan && cachedPlan.fresh && cachedPlan.isFree === false
+            ? false
+            : await fetchLivePlanAndCache(supabaseUrl, supabaseServiceRoleKey, instanceId);
+      } catch {
+        adminIsFree = false;
+      }
+      if (adminIsFree) {
+        return new Response(JSON.stringify({ error: "PRO_REQUIRED" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
     }
 
     if (action === "get_threads_with_identity") {
@@ -1946,13 +1965,13 @@ export async function GET({ request }: { request: Request }) {
           cachedPlan && cachedPlan.fresh
             ? cachedPlan.isFree
             : await fetchLivePlanAndCache(supabaseUrl, supabaseServiceRoleKey, instanceId);
-        return new Response(JSON.stringify({ isFree }), {
+        return new Response(JSON.stringify({ isFree, instanceId }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
       } catch {
-        return new Response(JSON.stringify({ isFree: true }), {
-          status: 200,
+        return new Response(JSON.stringify({ error: "Plan check failed" }), {
+          status: 502,
           headers: { "Content-Type": "application/json" },
         });
       }

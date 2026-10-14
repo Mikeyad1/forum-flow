@@ -1720,7 +1720,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
           {isHighlights ? (
             <span style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: color }}>
-              From the community
+              Join the conversation
             </span>
           ) : null}
           <h2 className="ff-title">{forumTitle}</h2>
