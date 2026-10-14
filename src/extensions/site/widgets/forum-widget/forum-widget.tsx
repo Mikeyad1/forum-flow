@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState, type FC } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, type FC } from 'react';
 import ReactDOM from 'react-dom';
 import reactToWebComponent from 'react-to-webcomponent';
 import { httpClient } from '@wix/essentials';
@@ -413,6 +413,8 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [highlightsExpanded, setHighlightsExpanded] = useState(false);
   const rootRef = useRef<HTMLElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const pendingHeightRef = useRef<number | null>(null);
   const expandedIdRef = useRef<string | null>(null);
   useEffect(() => {
     expandedIdRef.current = detailThread?.id ?? null;
@@ -1396,24 +1398,101 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     lineHeight: 1,
   };
 
+  const animateNextHeightChange = () => {
+    const el = bodyRef.current;
+    if (!el) return;
+    try {
+      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    } catch {
+      // ignore
+    }
+    pendingHeightRef.current = el.getBoundingClientRect().height;
+  };
+
+  const runTransition = (change: () => void) => {
+    const el = bodyRef.current;
+    let reduce = false;
+    try {
+      reduce = !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      reduce = false;
+    }
+    if (!el || reduce) {
+      change();
+      return;
+    }
+    animateNextHeightChange();
+    el.classList.add('ff-fading-out');
+    setTimeout(() => {
+      change();
+    }, 180);
+    setTimeout(() => {
+      el.classList.remove('ff-fading-out');
+    }, 700);
+  };
+
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    const from = pendingHeightRef.current;
+    if (el) el.classList.remove('ff-fading-out');
+    pendingHeightRef.current = null;
+    if (!el || from === null) return;
+    const to = el.getBoundingClientRect().height;
+    if (Math.abs(to - from) < 2) return;
+    el.style.height = `${from}px`;
+    el.style.overflow = 'hidden';
+    void el.offsetHeight;
+    el.style.transition = 'height 0.45s cubic-bezier(0.4, 0, 0.2, 1)';
+    el.style.height = `${to}px`;
+    const done = () => {
+      el.style.height = '';
+      el.style.overflow = '';
+      el.style.transition = '';
+    };
+    const onEnd = (e: TransitionEvent) => {
+      if (e.target === el && e.propertyName === 'height') done();
+    };
+    el.addEventListener('transitionend', onEnd);
+    const fallback = setTimeout(done, 650);
+    return () => {
+      clearTimeout(fallback);
+      el.removeEventListener('transitionend', onEnd);
+    };
+  }, [highlightsExpanded]);
+
   const highlightThreads = threads.filter((t) => !t.pending).slice(0, 3);
   const showHighlights = isHighlights && !highlightsExpanded && highlightThreads.length > 0;
 
   const openFromHighlight = (thread: Thread) => {
-    setHighlightsExpanded(true);
-    handleOpenThreadDetail(thread);
+    runTransition(() => {
+      setHighlightsExpanded(true);
+      handleOpenThreadDetail(thread);
+    });
+    setTimeout(() => {
+      const root = rootRef.current;
+      if (!root) return;
+      const card = root.querySelector(`[data-thread-id="${thread.id}"]`) as HTMLElement | null;
+      if (!card) return;
+      const rect = card.getBoundingClientRect();
+      if (rect.top < 60 || rect.top > window.innerHeight * 0.6) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 700);
   };
 
   const collapseHighlights = () => {
-    handleBackToList();
-    setCurrentPage(1);
-    setHighlightsExpanded(false);
+    const root = rootRef.current;
+    const needsScroll = !!root && root.getBoundingClientRect().top < 0;
+    if (needsScroll && root) {
+      root.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
     setTimeout(() => {
-      const el = rootRef.current;
-      if (el && el.getBoundingClientRect().top < 0) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    }, 0);
+      runTransition(() => {
+        handleBackToList();
+        setCurrentPage(1);
+        setHighlightsExpanded(false);
+      });
+    }, needsScroll ? 380 : 0);
   };
 
   const highlightsContent = (
@@ -1462,7 +1541,11 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           );
         })}
       </div>
-      <button type="button" className="ff-hl-seeall" onClick={() => setHighlightsExpanded(true)}>
+      <button
+        type="button"
+        className="ff-hl-seeall"
+        onClick={() => runTransition(() => setHighlightsExpanded(true))}
+      >
         See all discussions
       </button>
     </div>
@@ -1635,6 +1718,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         </div>
       </header>
 
+      <div ref={bodyRef}>
       {showNewThreadForm ? (
         <div style={{ display: 'grid', gap: '12px' }}>
           {identity.subjectType === 'VISITOR' ? visitorSignUpNudge : null}
@@ -1896,6 +1980,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
               return (
                 <li
                   key={thread.id}
+                  data-thread-id={thread.id}
                   role="button"
                   tabIndex={0}
                   onClick={() => (isExpanded ? handleBackToList() : handleOpenThreadDetail(thread))}
@@ -2463,6 +2548,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         {hasAside ? asideContent : null}
         </div>
       )}
+      </div>
       {isFree === true && (
         <div style={{
           marginTop: '12px',

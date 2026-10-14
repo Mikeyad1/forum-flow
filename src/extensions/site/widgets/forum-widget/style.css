@@ -87,14 +87,19 @@
 }
 
 .ff-fade-in {
-  animation: ff-fade-in 0.25s ease-out both;
+  animation: ff-fade-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) 0.06s both;
+}
+.ff-fading-out {
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
 }
 @keyframes ff-fade-in {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ff-fade-in { animation: none; }
+  .ff-fading-out { transition: none; }
 }
 .ff-hl-track {
   display: grid;
@@ -165,4 +170,11 @@
     scroll-snap-align: start;
     scroll-margin-left: 20px;
   }
+}
+
+.ff-root li[data-thread-id] {
+  scroll-margin-top: 90px;
+}
+.ff-root {
+  scroll-margin-top: 90px;
 }
