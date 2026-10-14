@@ -1400,18 +1400,25 @@ const ForumWidget: FC<ForumWidgetProps> = ({
 
   const getTopOverlay = (): number => {
     try {
-      const els = document.elementsFromPoint(window.innerWidth / 2, 4);
       let bottom = 0;
-      for (const start of els) {
-        let node: Element | null = start;
-        while (node && node !== document.body && node !== document.documentElement) {
-          const pos = window.getComputedStyle(node).position;
-          if (pos === 'fixed' || pos === 'sticky') {
-            bottom = Math.max(bottom, node.getBoundingClientRect().bottom);
-            break;
+      for (let i = 0; i < 6; i++) {
+        const y = bottom + 2;
+        if (y > window.innerHeight * 0.5) break;
+        const els = document.elementsFromPoint(window.innerWidth / 2, y);
+        let found = 0;
+        for (const start of els) {
+          let node: Element | null = start;
+          while (node && node !== document.body && node !== document.documentElement) {
+            const pos = window.getComputedStyle(node).position;
+            if (pos === 'fixed' || pos === 'sticky') {
+              found = Math.max(found, node.getBoundingClientRect().bottom);
+              break;
+            }
+            node = node.parentElement;
           }
-          node = node.parentElement;
         }
+        if (found <= bottom) break;
+        bottom = found;
       }
       return Math.min(Math.max(bottom, 0), window.innerHeight * 0.4);
     } catch {
