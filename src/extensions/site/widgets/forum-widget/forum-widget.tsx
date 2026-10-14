@@ -1398,6 +1398,32 @@ const ForumWidget: FC<ForumWidgetProps> = ({
     lineHeight: 1,
   };
 
+  const getTopOverlay = (): number => {
+    try {
+      const els = document.elementsFromPoint(window.innerWidth / 2, 4);
+      let bottom = 0;
+      for (const start of els) {
+        let node: Element | null = start;
+        while (node && node !== document.body && node !== document.documentElement) {
+          const pos = window.getComputedStyle(node).position;
+          if (pos === 'fixed' || pos === 'sticky') {
+            bottom = Math.max(bottom, node.getBoundingClientRect().bottom);
+            break;
+          }
+          node = node.parentElement;
+        }
+      }
+      return Math.min(Math.max(bottom, 0), window.innerHeight * 0.4);
+    } catch {
+      return 0;
+    }
+  };
+
+  const scrollToElement = (el: HTMLElement) => {
+    el.style.scrollMarginTop = `${getTopOverlay() + 16}px`;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   const animateNextHeightChange = () => {
     const el = bodyRef.current;
     if (!el) return;
@@ -1474,17 +1500,16 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       const card = root.querySelector(`[data-thread-id="${thread.id}"]`) as HTMLElement | null;
       if (!card) return;
       const rect = card.getBoundingClientRect();
-      if (rect.top < 60 || rect.top > window.innerHeight * 0.6) {
-        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (rect.top < getTopOverlay() + 8 || rect.top > window.innerHeight * 0.6) {
+        scrollToElement(card);
       }
-    }, 700);
-  };
+    }, 650);  };
 
   const collapseHighlights = () => {
     const root = rootRef.current;
-    const needsScroll = !!root && root.getBoundingClientRect().top < 0;
+    const needsScroll = !!root && root.getBoundingClientRect().top < getTopOverlay();
     if (needsScroll && root) {
-      root.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      scrollToElement(root);
     }
     setTimeout(() => {
       runTransition(() => {
@@ -1544,7 +1569,17 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       <button
         type="button"
         className="ff-hl-seeall"
-        onClick={() => runTransition(() => setHighlightsExpanded(true))}
+        onClick={() => {
+          runTransition(() => setHighlightsExpanded(true));
+          setTimeout(() => {
+            const root = rootRef.current;
+            if (!root) return;
+            const top = root.getBoundingClientRect().top;
+            if (top < getTopOverlay() || top > window.innerHeight * 0.35) {
+              scrollToElement(root);
+            }
+          }, 650);
+        }}
       >
         See all discussions
       </button>
