@@ -924,6 +924,22 @@ export async function GET({ request }: { request: Request }) {
         subjectType: tokenInfo.subjectType ?? null,
       };
 
+      // Count one forum view per live-site load (runs in parallel with the reads below)
+      const viewInsert = fetch(`${supabaseUrl}/rest/v1/forum_views`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: supabaseServiceRoleKey,
+          Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({
+          site_id: instanceId,
+          kind: "forum",
+          viewer_id: tokenInfo.subjectId ?? null,
+        }),
+      }).catch(() => null);
+
       const [threadsResponse, staffResponse, threadLikesResponse] = await Promise.all([
         fetch(
           `${supabaseUrl}/rest/v1/threads?site_id=eq.${encodeURIComponent(instanceId)}&select=*&order=is_pinned.desc,created_at.desc`,
@@ -1055,6 +1071,8 @@ export async function GET({ request }: { request: Request }) {
           return { ...row, likeCount: threadLikeCounts[tid] ?? 0, likedByMe: threadLikedByMe.has(tid) };
         });
       }
+
+      await viewInsert;
 
       let repliesByThread: Record<string, unknown[]> | null = null;
       const perPageParam = Number(url.searchParams.get("replies_for") ?? "0");
@@ -1954,6 +1972,221 @@ export async function GET({ request }: { request: Request }) {
         new Set((Array.isArray(searchRows) ? searchRows : []).map((r) => String(r.thread_id)))
       );
       return new Response(JSON.stringify({ threadIds: matchedThreadIds }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    } else if (action === "track_view") {
+      const threadId = url.searchParams.get("thread_id") ?? "";
+      if (!/^[A-Za-z0-9-]{1,64}$/.test(threadId)) {
+        return new Response(JSON.stringify({ error: "Invalid thread_id" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      try {
+        await fetch(`${supabaseUrl}/rest/v1/forum_views`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supabaseServiceRoleKey,
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify({
+            site_id: instanceId,
+            kind: "post",
+            thread_id: threadId,
+            viewer_id: tokenInfo.subjectId ?? null,
+          }),
+        });
+      } catch {
+        // Tracking is best-effort
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } else if (action === "get_dashboard") {
+      if (tokenInfo.subjectType !== "USER") {
+        return new Response(JSON.stringify({ error: "Not allowed" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const sbHeaders = {
+        apikey: supabaseServiceRoleKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+      };
+      const siteFilter = `site_id=eq.${encodeURIComponent(instanceId)}`;
+      const weekAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      const countRows = async (pathWithFilter: string): Promise<number> => {
+        try {
+          const res = await fetch(`${supabaseUrl}/rest/v1/${pathWithFilter}&select=site_id&limit=1`, {
+            headers: { ...sbHeaders, Prefer: "count=exact" },
+          });
+          if (!res.ok) return 0;
+          const range = res.headers.get("content-range") ?? "";
+          const total = Number(range.split("/")[1]);
+          return Number.isFinite(total) ? total : 0;
+        } catch {
+          return 0;
+        }
+      };
+
+      const [threadsRes, recentRepliesRes, threadLikesRes, seededRes, repliesTotal, threadLikesTotal, replyLikesTotal] =
+        await Promise.all([
+          fetch(
+            `${supabaseUrl}/rest/v1/threads?${siteFilter}&select=id,title,body,user_id,user_name,author_name,author_type,is_pinned,reply_count,created_at&order=is_pinned.desc,created_at.desc`,
+            { headers: sbHeaders }
+          ),
+          fetch(
+            `${supabaseUrl}/rest/v1/replies?${siteFilter}&created_at=gte.${encodeURIComponent(weekAgoIso)}&select=user_id`,
+            { headers: sbHeaders }
+          ),
+          fetch(`${supabaseUrl}/rest/v1/thread_likes?${siteFilter}&select=thread_id`, { headers: sbHeaders }),
+          fetch(`${supabaseUrl}/rest/v1/seeded_sites?${siteFilter}&select=site_id`, { headers: sbHeaders }),
+          countRows(`replies?${siteFilter}`),
+          countRows(`thread_likes?${siteFilter}`),
+          countRows(`reply_likes?${siteFilter}`),
+        ]);
+
+      if (!threadsRes.ok) {
+        return new Response(JSON.stringify({ error: "Failed to load dashboard" }), {
+          status: 502,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      type DashThread = {
+        id: string;
+        title: string | null;
+        body: string | null;
+        user_id: string | null;
+        user_name: string | null;
+        author_name: string | null;
+        author_type: string | null;
+        is_pinned: boolean | null;
+        reply_count: number | null;
+        created_at: string | null;
+      };
+      const threadRows = (await threadsRes.json()) as DashThread[];
+      const allThreads = Array.isArray(threadRows) ? threadRows : [];
+
+      const recentReplies = recentRepliesRes.ok
+        ? ((await recentRepliesRes.json()) as { user_id: string | null }[])
+        : [];
+      const threadLikeRows = threadLikesRes.ok
+        ? ((await threadLikesRes.json()) as { thread_id: string }[])
+        : [];
+      const seededRows = seededRes.ok ? ((await seededRes.json()) as unknown[]) : [];
+
+      const likeCountByThread: Record<string, number> = {};
+      for (const like of Array.isArray(threadLikeRows) ? threadLikeRows : []) {
+        const tid = String(like.thread_id);
+        likeCountByThread[tid] = (likeCountByThread[tid] ?? 0) + 1;
+      }
+
+      const realThreads = allThreads.filter((t) => t.user_id !== "system");
+      const weekAgoMs = Date.parse(weekAgoIso);
+      const isThisWeek = (raw: string | null) => {
+        const ms = raw ? Date.parse(raw) : NaN;
+        return Number.isFinite(ms) && ms >= weekAgoMs;
+      };
+
+      const activeIds = new Set<string>();
+      for (const t of realThreads) {
+        if (t.user_id && isThisWeek(t.created_at)) activeIds.add(t.user_id);
+      }
+      for (const r of Array.isArray(recentReplies) ? recentReplies : []) {
+        if (r.user_id && r.user_id !== "system") activeIds.add(r.user_id);
+      }
+
+      const threads = allThreads.map((t) => ({
+        ...t,
+        likeCount: likeCountByThread[String(t.id)] ?? 0,
+        is_example: t.user_id === "system",
+      }));
+
+      return new Response(
+        JSON.stringify({
+          threads,
+          stats: {
+            posts: realThreads.length,
+            postsThisWeek: realThreads.filter((t) => isThisWeek(t.created_at)).length,
+            replies: repliesTotal,
+            repliesThisWeek: Array.isArray(recentReplies) ? recentReplies.length : 0,
+            likes: threadLikesTotal + replyLikesTotal,
+            activeMembersThisWeek: activeIds.size,
+          },
+          forumIsLive: (Array.isArray(seededRows) && seededRows.length > 0) || realThreads.length > 0,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+
+    } else if (action === "owner_remove_example") {
+      if (tokenInfo.subjectType !== "USER") {
+        return new Response(JSON.stringify({ error: "Not allowed" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const threadId = url.searchParams.get("thread_id");
+      if (!threadId) {
+        return new Response(JSON.stringify({ error: "Missing thread_id" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const sbHeaders = {
+        apikey: supabaseServiceRoleKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+      };
+      const siteFilter = `site_id=eq.${encodeURIComponent(instanceId)}`;
+      const threadFilter = `thread_id=eq.${encodeURIComponent(threadId)}`;
+
+      // Only example posts (user_id = system) can be removed through this action
+      const deleteRes = await fetch(
+        `${supabaseUrl}/rest/v1/threads?id=eq.${encodeURIComponent(threadId)}&${siteFilter}&user_id=eq.system`,
+        {
+          method: "DELETE",
+          headers: { ...sbHeaders, Prefer: "return=representation" },
+        }
+      );
+      if (!deleteRes.ok) {
+        return new Response(JSON.stringify({ error: "Failed to remove example post" }), {
+          status: 502,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const deletedRows = (await deleteRes.json()) as unknown[];
+      if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+        return new Response(JSON.stringify({ error: "Example post not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Best-effort cleanup; also mark the site as seeded so examples are never re-created
+      await Promise.all([
+        fetch(`${supabaseUrl}/rest/v1/replies?${threadFilter}&${siteFilter}`, { method: "DELETE", headers: sbHeaders }).catch(() => null),
+        fetch(`${supabaseUrl}/rest/v1/thread_likes?${threadFilter}&${siteFilter}`, { method: "DELETE", headers: sbHeaders }).catch(() => null),
+        fetch(`${supabaseUrl}/rest/v1/seeded_sites?on_conflict=site_id`, {
+          method: "POST",
+          headers: {
+            ...sbHeaders,
+            "Content-Type": "application/json",
+            Prefer: "resolution=ignore-duplicates,return=minimal",
+          },
+          body: JSON.stringify({ site_id: instanceId }),
+        }).catch(() => null),
+      ]);
+
+      return new Response(JSON.stringify({ success: true }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });

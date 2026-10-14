@@ -775,6 +775,17 @@ const ForumWidget: FC<ForumWidgetProps> = ({
 
   const handleOpenThreadDetail = (thread: Thread) => {
     if (thread.pending) return;
+    try {
+      const viewedKey = `forumflow:viewed:${thread.id}`;
+      if (!window.sessionStorage.getItem(viewedKey)) {
+        window.sessionStorage.setItem(viewedKey, '1');
+        void httpClient
+          .fetchWithAuth(`${baseApiUrl}/api/forum?action=track_view&thread_id=${encodeURIComponent(thread.id)}`)
+          .catch(() => {});
+      }
+    } catch {
+      // storage unavailable; skip view tracking
+    }
     saveExpandedToCache();
     const cached = repliesCacheRef.current[thread.id];
     setReplies(cached ?? []);
