@@ -500,6 +500,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       return null;
     })
     .filter((m): m is { id: string; name: string } => !!m && m.name !== 'You');
+  const hasAside = aboutText.trim().length > 0 || staffMembers.length > 0;
 
   const isStaff = (ownerUserId: string | null): boolean =>
     !!ownerUserId && staffUserIds.includes(ownerUserId);
@@ -1473,7 +1474,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         backgroundColor: '#f4f5f6',
         border: 'none',
         borderRadius: '16px',
-        padding: '20px max(20px, calc((100% - 1120px) / 2))',
+        padding: `20px max(20px, calc((100% - ${hasAside ? 1120 : 760}px) / 2))`,
         boxSizing: 'border-box',
         color: '#111827',
       }}
@@ -1492,7 +1493,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
             <span style={{ fontSize: '13px', color: '#6b7280' }}>{statsLabel}</span>
           ) : null}
         </div>
-        <div className={listVisible ? 'ff-header-cta' : undefined}>
+        <div className={listVisible && hasAside ? 'ff-header-cta' : undefined}>
         {threadsMembersOnlyBlock ? (
           <p style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>Members only</p>
         ) : (
@@ -1656,7 +1657,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
       ) : errorMessage ? (
         <p style={{ margin: 0, fontSize: '14px', color: '#b91c1c' }}>{errorMessage}</p>
       ) : (
-        <div className="ff-layout">
+        <div className={hasAside ? 'ff-layout' : 'ff-layout ff-layout--single'}>
         <div className="ff-main">
           {subjectType === 'MEMBER' && replyNotificationsOn && isFree === false && (
             <div
@@ -2338,7 +2339,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           </button>
         )}
         </div>
-        {asideContent}
+        {hasAside ? asideContent : null}
         </div>
       )}
       {isFree === true && (

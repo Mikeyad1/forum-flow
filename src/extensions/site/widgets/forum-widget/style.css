@@ -79,3 +79,9 @@
     border-radius: 0 !important;
   }
 }
+
+@container ff (min-width: 900px) {
+  .ff-layout.ff-layout--single {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
