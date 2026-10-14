@@ -6,6 +6,7 @@ export default extensions.customElement({
   width: {
     defaultWidth: 520,
     allowStretch: true,
+    stretchByDefault: true,
   },
   height: {
     defaultHeight: 360,

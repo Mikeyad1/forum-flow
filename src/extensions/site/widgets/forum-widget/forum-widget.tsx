@@ -1383,7 +1383,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         backgroundColor: '#f4f5f6',
         border: 'none',
         borderRadius: '16px',
-        padding: '20px',
+        padding: '20px max(20px, calc((100% - 760px) / 2))',
         boxSizing: 'border-box',
         color: '#111827',
       }}
