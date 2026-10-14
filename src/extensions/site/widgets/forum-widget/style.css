@@ -179,3 +179,26 @@
 .ff-root {
   scroll-margin-top: 90px;
 }
+.ff-hl-dots {
+  display: none;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  height: 6px;
+}
+.ff-hl-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background-color: #d1d5db;
+  transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.28s ease;
+}
+@container ff (max-width: 699px) {
+  .ff-hl-dots {
+    display: flex;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ff-hl-dot { transition: none; }
+}

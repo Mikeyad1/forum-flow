@@ -412,6 +412,7 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const [notifySaving, setNotifySaving] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [highlightsExpanded, setHighlightsExpanded] = useState(false);
+  const [hlIndex, setHlIndex] = useState(0);
   const rootRef = useRef<HTMLElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const pendingHeightRef = useRef<number | null>(null);
@@ -1496,6 +1497,15 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const highlightThreads = threads.filter((t) => !t.pending).slice(0, 3);
   const showHighlights = isHighlights && !highlightsExpanded && highlightThreads.length > 0;
 
+  const handleHlScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const max = el.scrollWidth - el.clientWidth;
+    const count = highlightThreads.length;
+    if (max <= 0 || count < 2) { setHlIndex(0); return; }
+    const next = Math.min(count - 1, Math.max(0, Math.round((Math.abs(el.scrollLeft) / max) * (count - 1))));
+    setHlIndex((prev) => (prev === next ? prev : next));
+  };
+
   const openFromHighlight = (thread: Thread) => {
     runTransition(() => {
       setHighlightsExpanded(true);
@@ -1523,13 +1533,14 @@ const ForumWidget: FC<ForumWidgetProps> = ({
         handleBackToList();
         setCurrentPage(1);
         setHighlightsExpanded(false);
+        setHlIndex(0);
       });
     }, needsScroll ? 380 : 0);
   };
 
   const highlightsContent = (
     <div className="ff-fade-in">
-      <div className="ff-hl-track">
+      <div className="ff-hl-track" onScroll={handleHlScroll}>
         {highlightThreads.map((thread) => {
           const av = avatarFor(thread.author);
           return (
@@ -1573,6 +1584,20 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           );
         })}
       </div>
+      {highlightThreads.length > 1 ? (
+        <div className="ff-hl-dots" aria-hidden="true">
+          {highlightThreads.map((t, i) => {
+            const active = i === hlIndex;
+            return (
+              <span
+                key={t.id}
+                className="ff-hl-dot"
+                style={{ width: active ? '18px' : '6px', backgroundColor: active ? color : undefined }}
+              />
+            );
+          })}
+        </div>
+      ) : null}
       <button
         type="button"
         className="ff-hl-seeall"
