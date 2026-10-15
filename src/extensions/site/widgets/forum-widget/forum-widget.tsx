@@ -363,6 +363,27 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   const [staffUserIds, setStaffUserIds] = useState<string[]>([]);
   const [isFree, setIsFree] = useState<boolean | null>(() => readPlanCache());
   const [visitorName, setVisitorName] = useState('');
+  const [needsName, setNeedsName] = useState(false);
+  const [memberName, setMemberName] = useState('');
+  const [memberNameError, setMemberNameError] = useState(false);
+
+  useEffect(() => {
+    if (subjectType !== 'MEMBER') {
+      setNeedsName(false);
+      return;
+    }
+    let cancelled = false;
+    httpClient
+      .fetchWithAuth(`${baseApiUrl}/api/forum?action=get_my_name`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { needs_name?: boolean } | null) => {
+        if (!cancelled) setNeedsName(!!data?.needs_name);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [subjectType]);
   const [isEditingThread, setIsEditingThread] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editBody, setEditBody] = useState('');
@@ -825,6 +846,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   };
 
   const handleSubmitNewThread = async () => {
+    if (needsName && !memberName.trim()) {
+      setMemberNameError(true);
+      return;
+    }
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
       setFormError("Title can't be empty.");
@@ -880,10 +905,12 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           content: submittedBody,
           category_id: null,
           visitor_name: visitorName,
+          member_name: needsName ? memberName.trim() : undefined,
           who_can_post_threads,
           who_can_post_replies,
         }),
       });
+      if (response.ok && needsName) setNeedsName(false);
 
       if (!response.ok) {
         if (response.status === 403) {
@@ -1255,6 +1282,10 @@ const ForumWidget: FC<ForumWidgetProps> = ({
   };
 
   const handleSubmitReply = async () => {
+    if (needsName && !memberName.trim()) {
+      setMemberNameError(true);
+      return;
+    }
     if (!detailThread) {
       return;
     }
@@ -1313,12 +1344,14 @@ const ForumWidget: FC<ForumWidgetProps> = ({
           thread_id: threadId,
           content: submittedBody,
           visitor_name: visitorName,
+          member_name: needsName ? memberName.trim() : undefined,
           who_can_post_threads,
           who_can_post_replies,
           page_url: window.location.href,
           reply_notifications: replyNotificationsOn ? 'true' : 'false',
         }),
       });
+      if (response.ok && needsName) setNeedsName(false);
 
       if (!response.ok) {
         if (response.status === 403) {
@@ -1817,6 +1850,32 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                   boxSizing: 'border-box',
                 }}
               />
+            </div>
+          )}
+          {needsName && (
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>Your name in the forum</label>
+              <input
+                type="text"
+                placeholder="e.g. Dana"
+                maxLength={50}
+                value={memberName}
+                onChange={(e) => {
+                  setMemberName(e.target.value);
+                  setMemberNameError(false);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: memberNameError ? '1px solid #b91c1c' : '1px solid #ccc',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  boxSizing: 'border-box',
+                }}
+              />
+              <div style={{ marginTop: '4px', fontSize: '12px', color: memberNameError ? '#b91c1c' : '#6b7280' }}>
+                {memberNameError ? 'Please enter your name.' : 'This is how others will see you. You only set it once.'}
+              </div>
             </div>
           )}
           <div>
@@ -2548,6 +2607,24 @@ const ForumWidget: FC<ForumWidgetProps> = ({
                               onChange={(e) => setVisitorName(e.target.value)}
                               style={fieldInputStyle}
                             />
+                          ) : null}
+                          {needsName ? (
+                            <div>
+                              <input
+                                type="text"
+                                placeholder="Your name in the forum (e.g. Dana)"
+                                maxLength={50}
+                                value={memberName}
+                                onChange={(e) => {
+                                  setMemberName(e.target.value);
+                                  setMemberNameError(false);
+                                }}
+                                style={fieldInputStyle}
+                              />
+                              {memberNameError ? (
+                                <div style={{ marginTop: '4px', fontSize: '12px', color: '#b91c1c' }}>Please enter your name.</div>
+                              ) : null}
+                            </div>
                           ) : null}
                           <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
                             <textarea

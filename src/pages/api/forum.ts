@@ -14,7 +14,28 @@ type CreateThreadBody = {
   who_can_post_replies?: string;
   page_url?: string;
   reply_notifications?: string | boolean;
+  member_name?: string;
 };
+
+type WixNameSource = {
+  loginEmail?: string | null;
+  profile?: { nickname?: string | null } | null;
+  contact?: { firstName?: string | null; lastName?: string | null } | null;
+} | null | undefined;
+
+// Name shown in the forum, from the member's Wix profile. '' means Wix has no usable name (the member is asked for one).
+function wixDisplayName(memberData: WixNameSource): string {
+  const emailPrefix = memberData?.loginEmail?.split('@')[0]?.toLowerCase() ?? '';
+  const nickname = memberData?.profile?.nickname?.trim() ?? '';
+  const firstName = memberData?.contact?.firstName?.trim() ?? '';
+  const lastName = memberData?.contact?.lastName?.trim() ?? '';
+  const nicknameLooksLikeEmail =
+    !!nickname &&
+    (nickname.includes('@') || (emailPrefix !== '' && nickname.toLowerCase() === emailPrefix));
+  if (nickname && !nicknameLooksLikeEmail) return nickname;
+  if (firstName) return lastName ? `${firstName} ${lastName.charAt(0)}.` : firstName;
+  return '';
+}
 
 const PLAN_CACHE_TTL_MS = 15 * 60 * 1000;
 
@@ -175,21 +196,7 @@ export async function POST({ request }: { request: Request }) {
     if (subjectType === "MEMBER" || subjectType === "USER") {
       try {
         const memberData = await elevatedGetMember(userId, { fieldsets: ["FULL"] });
-        const emailPrefix = memberData?.loginEmail?.split('@')[0]?.toLowerCase() ?? '';
-        const nickname = memberData?.profile?.nickname?.trim() ?? '';
-        const firstName = memberData?.contact?.firstName?.trim() ?? '';
-        const lastName = memberData?.contact?.lastName?.trim() ?? '';
-        const nicknameLooksLikeEmail =
-          !!nickname &&
-          (nickname.includes('@') || (emailPrefix !== '' && nickname.toLowerCase() === emailPrefix));
-
-        if (nickname && !nicknameLooksLikeEmail) {
-          userName = nickname;
-        } else if (firstName) {
-          userName = lastName ? `${firstName} ${lastName.charAt(0)}.` : firstName;
-        } else {
-          userName = 'Member';
-        }
+        userName = wixDisplayName(memberData) || `Member ${userId.slice(0, 4).toUpperCase()}`;
       } catch {
         // keep default
       }
@@ -236,6 +243,55 @@ export async function POST({ request }: { request: Request }) {
         JSON.stringify({ error: "Missing server env vars" }),
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
+    }
+
+    // Member display name: a name chosen in the composer is saved (and applied to the member's older posts); otherwise a saved name wins
+    if (subjectType === "MEMBER" && (action === "create_thread" || action === "create_reply")) {
+      const nameHeaders = {
+        apikey: supabaseServiceRoleKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+        "Content-Type": "application/json",
+      };
+      const memberFilter = `site_id=eq.${encodeURIComponent(instanceId)}&user_id=eq.${encodeURIComponent(userId)}`;
+      const requestedName = typeof body.member_name === "string" ? body.member_name.trim().slice(0, 50) : "";
+      try {
+        if (requestedName) {
+          const saveRes = await fetch(`${supabaseUrl}/rest/v1/member_names?on_conflict=site_id,user_id`, {
+            method: "POST",
+            headers: { ...nameHeaders, Prefer: "resolution=merge-duplicates,return=minimal" },
+            body: JSON.stringify({
+              site_id: instanceId,
+              user_id: userId,
+              display_name: requestedName,
+              updated_at: new Date().toISOString(),
+            }),
+          });
+          if (saveRes.ok) {
+            userName = requestedName;
+            const patchInit = {
+              method: "PATCH",
+              headers: { ...nameHeaders, Prefer: "return=minimal" },
+              body: JSON.stringify({ user_name: requestedName }),
+            };
+            await Promise.all([
+              fetch(`${supabaseUrl}/rest/v1/threads?${memberFilter}`, patchInit),
+              fetch(`${supabaseUrl}/rest/v1/replies?${memberFilter}`, patchInit),
+            ]);
+          }
+        } else {
+          const savedRes = await fetch(`${supabaseUrl}/rest/v1/member_names?${memberFilter}&select=display_name`, {
+            headers: nameHeaders,
+          });
+          if (savedRes.ok) {
+            const savedRows = (await savedRes.json()) as { display_name?: string | null }[];
+            const savedName =
+              Array.isArray(savedRows) && savedRows[0]?.display_name ? String(savedRows[0].display_name).trim() : "";
+            if (savedName) userName = savedName;
+          }
+        }
+      } catch {
+        // Name storage is best-effort; never block posting
+      }
     }
 
     if (action === "create_thread") {
@@ -1022,7 +1078,7 @@ export async function GET({ request }: { request: Request }) {
                 {
                   site_id: instanceId,
                   title: "What would you like to discuss here?",
-                  body: 'This is just an example thread to show you what ForumFlow looks like. Click "New Thread" to start your own conversation!',
+                  body: 'This is just an example thread to show you what ForumFlow looks like. Click "Start a discussion" to start your own conversation!',
                   author_name: "ForumFlow",
                   user_name: "ForumFlow",
                   user_id: "system",
@@ -1716,6 +1772,44 @@ export async function GET({ request }: { request: Request }) {
         });
       }
 
+    } else if (action === "get_my_name") {
+      if (tokenInfo.subjectType !== "MEMBER" || !tokenInfo.subjectId) {
+        return new Response(JSON.stringify({ needs_name: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const memberId = tokenInfo.subjectId;
+      try {
+        const savedRes = await fetch(
+          `${supabaseUrl}/rest/v1/member_names?site_id=eq.${encodeURIComponent(instanceId)}&user_id=eq.${encodeURIComponent(memberId)}&select=display_name`,
+          {
+            headers: {
+              apikey: supabaseServiceRoleKey,
+              Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            },
+          }
+        );
+        if (savedRes.ok) {
+          const savedRows = (await savedRes.json()) as unknown[];
+          if (Array.isArray(savedRows) && savedRows.length > 0) {
+            return new Response(JSON.stringify({ needs_name: false }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+        }
+        const memberData = await auth.elevate(members.getMember)(memberId, { fieldsets: ["FULL"] });
+        return new Response(JSON.stringify({ needs_name: !wixDisplayName(memberData) }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch {
+        return new Response(JSON.stringify({ needs_name: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
     } else if (action === "get_notify_pref") {
       if (tokenInfo.subjectType !== "MEMBER" || !tokenInfo.subjectId) {
         return new Response(JSON.stringify({ eligible: false, enabled: false }), {
