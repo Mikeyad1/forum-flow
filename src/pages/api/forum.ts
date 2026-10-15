@@ -2020,112 +2020,59 @@ export async function GET({ request }: { request: Request }) {
         Authorization: `Bearer ${supabaseServiceRoleKey}`,
       };
       const siteFilter = `site_id=eq.${encodeURIComponent(instanceId)}`;
-      const weekAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const tzParam = url.searchParams.get("tz") ?? "UTC";
+      const tz = /^[A-Za-z0-9_+\-\/]{1,64}$/.test(tzParam) ? tzParam : "UTC";
 
-      const countRows = async (pathWithFilter: string): Promise<number> => {
-        try {
-          const res = await fetch(`${supabaseUrl}/rest/v1/${pathWithFilter}&select=site_id&limit=1`, {
-            headers: { ...sbHeaders, Prefer: "count=exact" },
-          });
-          if (!res.ok) return 0;
-          const range = res.headers.get("content-range") ?? "";
-          const total = Number(range.split("/")[1]);
-          return Number.isFinite(total) ? total : 0;
-        } catch {
-          return 0;
-        }
-      };
+      const [threadsRes, statsRes, seededRes] = await Promise.all([
+        fetch(
+          `${supabaseUrl}/rest/v1/threads?${siteFilter}&select=id,title,body,user_id,user_name,author_name,author_type,is_pinned,reply_count,created_at&order=is_pinned.desc,created_at.desc`,
+          { headers: sbHeaders }
+        ),
+        fetch(`${supabaseUrl}/rest/v1/rpc/forum_dashboard_stats`, {
+          method: "POST",
+          headers: { ...sbHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({ p_site: instanceId, p_tz: tz }),
+        }),
+        fetch(`${supabaseUrl}/rest/v1/seeded_sites?${siteFilter}&select=site_id`, { headers: sbHeaders }),
+      ]);
 
-      const [threadsRes, recentRepliesRes, threadLikesRes, seededRes, repliesTotal, threadLikesTotal, replyLikesTotal] =
-        await Promise.all([
-          fetch(
-            `${supabaseUrl}/rest/v1/threads?${siteFilter}&select=id,title,body,user_id,user_name,author_name,author_type,is_pinned,reply_count,created_at&order=is_pinned.desc,created_at.desc`,
-            { headers: sbHeaders }
-          ),
-          fetch(
-            `${supabaseUrl}/rest/v1/replies?${siteFilter}&created_at=gte.${encodeURIComponent(weekAgoIso)}&select=user_id`,
-            { headers: sbHeaders }
-          ),
-          fetch(`${supabaseUrl}/rest/v1/thread_likes?${siteFilter}&select=thread_id`, { headers: sbHeaders }),
-          fetch(`${supabaseUrl}/rest/v1/seeded_sites?${siteFilter}&select=site_id`, { headers: sbHeaders }),
-          countRows(`replies?${siteFilter}`),
-          countRows(`thread_likes?${siteFilter}`),
-          countRows(`reply_likes?${siteFilter}`),
-        ]);
-
-      if (!threadsRes.ok) {
+      if (!threadsRes.ok || !statsRes.ok) {
         return new Response(JSON.stringify({ error: "Failed to load dashboard" }), {
           status: 502,
           headers: { "Content-Type": "application/json" },
         });
       }
 
-      type DashThread = {
-        id: string;
-        title: string | null;
-        body: string | null;
-        user_id: string | null;
-        user_name: string | null;
-        author_name: string | null;
-        author_type: string | null;
-        is_pinned: boolean | null;
-        reply_count: number | null;
-        created_at: string | null;
-      };
-      const threadRows = (await threadsRes.json()) as DashThread[];
+      const threadRows = (await threadsRes.json()) as Record<string, unknown>[];
       const allThreads = Array.isArray(threadRows) ? threadRows : [];
-
-      const recentReplies = recentRepliesRes.ok
-        ? ((await recentRepliesRes.json()) as { user_id: string | null }[])
-        : [];
-      const threadLikeRows = threadLikesRes.ok
-        ? ((await threadLikesRes.json()) as { thread_id: string }[])
-        : [];
+      const rawStats = ((await statsRes.json()) ?? {}) as Record<string, unknown>;
       const seededRows = seededRes.ok ? ((await seededRes.json()) as unknown[]) : [];
 
-      const likeCountByThread: Record<string, number> = {};
-      for (const like of Array.isArray(threadLikeRows) ? threadLikeRows : []) {
-        const tid = String(like.thread_id);
-        likeCountByThread[tid] = (likeCountByThread[tid] ?? 0) + 1;
-      }
+      const threadViews = (rawStats.thread_views ?? {}) as Record<string, number>;
+      const threadLikes = (rawStats.thread_likes ?? {}) as Record<string, number>;
+      const stats: Record<string, unknown> = { ...rawStats };
+      delete stats.thread_views;
+      delete stats.thread_likes;
 
-      const realThreads = allThreads.filter((t) => t.user_id !== "system");
-      const weekAgoMs = Date.parse(weekAgoIso);
-      const isThisWeek = (raw: string | null) => {
-        const ms = raw ? Date.parse(raw) : NaN;
-        return Number.isFinite(ms) && ms >= weekAgoMs;
-      };
+      const threads = allThreads.map((t) => {
+        const id = String(t.id);
+        return {
+          ...t,
+          likeCount: Number(threadLikes[id] ?? 0),
+          views: Number(threadViews[id] ?? 0),
+          is_example: t.user_id === "system",
+        };
+      });
 
-      const activeIds = new Set<string>();
-      for (const t of realThreads) {
-        if (t.user_id && isThisWeek(t.created_at)) activeIds.add(t.user_id);
-      }
-      for (const r of Array.isArray(recentReplies) ? recentReplies : []) {
-        if (r.user_id && r.user_id !== "system") activeIds.add(r.user_id);
-      }
+      const forumIsLive =
+        (Array.isArray(seededRows) && seededRows.length > 0) ||
+        Number(stats.posts_total ?? 0) > 0 ||
+        Number(stats.views_all_time ?? 0) > 0;
 
-      const threads = allThreads.map((t) => ({
-        ...t,
-        likeCount: likeCountByThread[String(t.id)] ?? 0,
-        is_example: t.user_id === "system",
-      }));
-
-      return new Response(
-        JSON.stringify({
-          threads,
-          stats: {
-            posts: realThreads.length,
-            postsThisWeek: realThreads.filter((t) => isThisWeek(t.created_at)).length,
-            replies: repliesTotal,
-            repliesThisWeek: Array.isArray(recentReplies) ? recentReplies.length : 0,
-            likes: threadLikesTotal + replyLikesTotal,
-            activeMembersThisWeek: activeIds.size,
-          },
-          forumIsLive: (Array.isArray(seededRows) && seededRows.length > 0) || realThreads.length > 0,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-
+      return new Response(JSON.stringify({ threads, stats, forumIsLive }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     } else if (action === "owner_remove_example") {
       if (tokenInfo.subjectType !== "USER") {
         return new Response(JSON.stringify({ error: "Not allowed" }), {
